@@ -133,11 +133,11 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 	Context("No Vault", Label("Platform:None"), func() {
 		fmt.Println("Please configure a vault")
 		var (
-			secretPath  = "secret/data/e2e-test"
-			secretName  = "vault-e2e-test"
-			secretKey   = "username"
-			secretValue = "admin"
-			secretName  = "vault-store"
+			vaultSecretPath  = "secret/data/e2e-test"
+			vaultK8sSecretName  = "vault-e2e-test"
+			vaultSecretKey   = "username"
+			vaultSecretValue = "admin"
+			vaultStoreName  = "vault-store"
 		)
 
 		BeforeEach(func() {
@@ -149,28 +149,28 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 			By("Creating secret directly in Vault")
 			err := createVaultKVSecret(secretPath, map[string]string{
-				secretKey: secretValue,
+				vaultSecretKey: vaultSecretValue,
 			})
-			Except(err).ToNot(HaveOccured())
+			Expect(err).ToNot(HaveOccured())
 
 			By("Creating SecretStore for Vault")
-			err = createVaultSecretStore(storeName)
-			Except(err).ToNot(HaveOccured())
+			err = createVaultSecretStore(vaultStoreName)
+			Expect(err).ToNot(HaveOccured())
 
 			By("Creating ExternalSecret to fetch Vault secret")
 			err = createExternalSecret(
-				secretName,
-				storeName,
-				secretPath,
-				secretKey,
-				secretKey,
+				vaultK8sSecretName,
+				vaultStoreName,
+				vaultSecretPath,
+				vaultSecretKey,
+				vaultSecretKey,
 			)
 			Except(err).ToNot(HaveOccured())
 
 			By("Validating that Kubernetes secret is created")
 			Eventually(func() (string, error) {
-				return getK8sSecretValue(secretName, SecretKey)
-			}, "2m", "5s").Should(Equal(secretValue))
+				return getK8sSecretValue(vaultK8sSecretName, vaultSecretKey)
+			}, "2m", "5s").Should(Equal(vaultSecretValue))
 			})
 		})
 	})
