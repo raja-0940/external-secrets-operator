@@ -178,7 +178,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 	func isVaultAvailable() bool {
 		cmd := exec.Command("oc", "get", "pods", "-n", "vault")
 		out, err := cmd.CombinedOutput()
-		return, err == nil && strings.Contains(string(out), "vault")
+		return err == nil && strings.Contains(string(out), "vault")
 	}
 
 	func createVaultKVSecret(path string, data map[string]string) error {
@@ -264,7 +264,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 		cmd := exec.Command("oc", "apply", "-f", tmpFile)
 		out, err := cmd.CombinedOutput()
-		if != nil {
+		if err != nil {
 			return fmt.Errorf("faile to create ExternalSecret: %s", string(out))
 		}
 
