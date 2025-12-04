@@ -25,6 +25,9 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"os"
+	"os/exec"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -148,14 +151,14 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		It("Should create secret in Vault, create SecretStore, and sync via ExternalSecret", func() {
 
 			By("Creating secret directly in Vault")
-			err := createVaultKVSecret(secretPath, map[string]string{
+			err := createVaultKVSecret(vaultSecretPath, map[string]string{
 				vaultSecretKey: vaultSecretValue,
 			})
-			Expect(err).ToNot(HaveOccured())
+			Expect(err).ToNot(HaveOccurred())
 
 			By("Creating SecretStore for Vault")
 			err = createVaultSecretStore(vaultStoreName)
-			Expect(err).ToNot(HaveOccured())
+			Expect(err).ToNot(HaveOccurred())
 
 			By("Creating ExternalSecret to fetch Vault secret")
 			err = createExternalSecret(
@@ -165,7 +168,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				vaultSecretKey,
 				vaultSecretKey,
 			)
-			Except(err).ToNot(HaveOccured())
+			Except(err).ToNot(HaveOccurred())
 
 			By("Validating that Kubernetes secret is created")
 			Eventually(func() (string, error) {
@@ -198,24 +201,24 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 	func createVaultSecretStore(storeName string) error {
 		ss := fmt.Sprintf(`
-		apiVersion: external-secrets.io/v1
-		kind: SecretStore
-		metadata
-		  name: %s
-		  namespace: external-secrets-operator
-		spec:
-		  provider:
-		    vault:
-			  server: http://vault1.external-secrets-operator.svc.cluster.local:8200
-			  path: secret
-			  version: v2
-			  auth:
-			    kubernetes:
-				  mountPath: kubernetes
-				  role: eso-role
-				  serverAccountRef:
-				    name: external-secrets-operator-controller-manager
-		`, storeName)
+	apiVersion: external-secrets.io/v1
+	kind: SecretStore
+	metadata
+	  name: %s
+	  namespace: external-secrets-operator
+	spec:
+	  provider:
+	    vault:
+		  server: http://vault1.external-secrets-operator.svc.cluster.local:8200
+		  path: secret
+		  version: v2
+		  auth:
+		    kubernetes:
+			  mountPath: kubernetes
+			  role: eso-role
+			  serverAccountRef:
+			    name: external-secrets-operator-controller-manager
+	`, storeName)
 
 		tmpFile := "/tmp/vault-secretstore.yaml"
 		err := os.WriteFile(tmpFile, []byte(ss), 0644)
@@ -237,24 +240,24 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 	) error {
 
 		es := fmt.Sprintf(`
-		apiVersion: external-secrets.io/v1
-		kind: ExternalSecret
-		metadata:
-		  name: %s
-		  namespace: external-secrets-operator
-		spec:
-		  refreshInterval: 10s
-		  secretStoreRef:
-		    name: %s
-			kind: SecretStore
-		  target:
-		    name: %s
-		  data:
-		  - secretKey: %s
-		    remoteRef:
-			  key: %s
-			  property: %s		
-		`, name, storeName, name, targetKey, remoteKey, remoteProperty)
+	apiVersion: external-secrets.io/v1
+	kind: ExternalSecret
+	metadata:
+	  name: %s
+	  namespace: external-secrets-operator
+	spec:
+	  refreshInterval: 10s
+	  secretStoreRef:
+	    name: %s
+		kind: SecretStore
+	  target:
+	    name: %s
+	  data:
+	  - secretKey: %s
+	    remoteRef:
+		  key: %s
+		  property: %s		
+	`, name, storeName, name, targetKey, remoteKey, remoteProperty)
 
 		tmpFile := "/tmp/vault-es.yaml"
 		err := os.WriteFile(tmpFile, []byte(es), 0644)
