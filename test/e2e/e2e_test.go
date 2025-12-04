@@ -130,6 +130,167 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		})).To(Succeed())
 	})
 
+	Context("No Vault", Label("Platform:None"), func() {
+		fmt.Println("Please configure a vault")
+		var (
+			secretPath  = "secret/data/e2e-test"
+			secretName  = "vault-e2e-test"
+			secretKey   = "username"
+			secretValue = "admin"
+			secretName  = "vault-store"
+		)
+
+		BeforeEach(func() {
+			By("Ensuring Vault is running")
+			Expect(isVaultAvailable()).To(BeTrue())
+		})
+
+		It("Should create secret in Vault, create SecretStore, and sync via ExternalSecret", func() {
+
+			By("Creating secret directly in Vault")
+			err := createVaultKVSecret(secretPath, map[string]string{
+				secretKey: secretValue,
+			})
+			Except(err).ToNot(HaveOccured())
+
+			By("Creating SecretStore for Vault")
+			err = createVaultSecretStore(storeName)
+			Except(err).ToNot(HaveOccured())
+
+			By("Creating ExternalSecret to fetch Vault secret")
+			err = createExternalSecret(
+				secretName,
+				storeName,
+				secretPath,
+				secretKey,
+				secretKey,
+			)
+			Except(err).ToNot(HaveOccured())
+
+			By("Validating that Kubernetes secret is created")
+			Eventually(func() (string, error) {
+				return getK8sSecretValue(secretName, SecretKey)
+			}, "2m", "5s").Should(Equal(secretValue))
+			})
+		})
+	})
+
+	func isVaultAvailable() bool {
+		cmd := exec.Command("oc", "get", "pods", "-n", "vault")
+		out, err := cmd.CombinedOutput()
+		return, err == nil && strings.Contains(string(out), "vault")
+	}
+
+	func createVaultKVSecret(path string, data map[string]string) error {
+		args := []string{"exec", "-n", "vault", "vault1-0", "--", "vault", "kv", "put", path}
+
+		for k,v := range data {
+			args = append(args, fmt.Sprintf("%s=%s", k, v))			
+		}
+
+		cmd := exec.Command("oc", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to create vault secret: %s", string(out))			
+		}
+		return nil
+	}
+
+	func createVaultSecretStore(storeName string) error {
+		ss := fmt.Sprintf(`
+		apiVersion: external-secrets.io/v1
+		kind: SecretStore
+		metadata
+		  name: %s
+		  namespace: external-secrets-operator
+		spec:
+		  provider:
+		    vault:
+			  server: http://vault1.external-secrets-operator.svc.cluster.local:8200
+			  path: secret
+			  version: v2
+			  auth:
+			    kubernetes:
+				  mountPath: kubernetes
+				  role: eso-role
+				  serverAccountRef:
+				    name: external-secrets-operator-controller-manager
+		`, storeName)
+
+		tmpFile := "/tmp/vault-secretstore.yaml"
+		err := os.WriteFile(tmpFile, []byte(ss), 0644)
+		if err != nil {
+			return err
+		}
+
+		cmd := exec.Command("oc", "apply", "-f", tmpFile)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to create SecretStore: %s", string(out))
+		}
+
+		return nil
+	}
+
+	func createExternalSecret(
+		name, storeName, remoteKey, remoteProperty, targetKey string,
+	) error {
+
+		es := fmt.Sprintf(`
+		apiVersion: external-secrets.io/v1
+		kind: ExternalSecret
+		metadata:
+		  name: %s
+		  namespace: external-secrets-operator
+		spec:
+		  refreshInterval: 10s
+		  secretStoreRef:
+		    name: %s
+			kind: SecretStore
+		  target:
+		    name: %s
+		  data:
+		  - secretKey: %s
+		    remoteRef:
+			  key: %s
+			  property: %s		
+		`, name, storeName, name, targetKey, remoteKey, remoteProperty)
+
+		tmpFile := "/tmp/vault-es.yaml"
+		err := os.WriteFile(tmpFile, []byte(es), 0644)
+		if err != nil {
+			return err
+		}
+
+		cmd := exec.Command("oc", "apply", "-f", tmpFile)
+		out, err := cmd.CombinedOutput()
+		if != nil {
+			return fmt.Errorf("faile to create ExternalSecret: %s", string(out))
+		}
+
+		return nil
+	}
+	
+	func getK8sSecretValue(secretName, key string) (string, error) {
+		cmd := exec.Command(
+			"oc", "get", "secret", secretName,
+			"-n", "external-secrets-operator",
+			"-o", "jsonpath={.data."+key+"}",
+		)
+
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", err
+		}
+
+		decoded, err := base64.StdEncoding.DecodeString(string(out))
+		if err != nil {
+			return "", err
+		}
+
+		return string(decoded), nil
+	}
+
 	Context("AWS Secret Manager", Label("Platform:AWS"), func() {
 		const (
 			clusterSecretStoreFile           = "testdata/aws_secret_store.yaml"
