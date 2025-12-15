@@ -108,7 +108,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		got, err := clientset.CoreV1().Namespaces().Create(context.Background(), namespace, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred(), "failed to create test namespace")
 		testNamespace = got.GetName()
-		fmt.Println(testNamespace)
+		// fmt.Println(testNamespace)
 
 		By("Waiting for operator pod to be ready")
 		Expect(utils.VerifyPodsReadyByPrefix(ctx, clientset, operatorNamespace, []string{
@@ -187,13 +187,13 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 })
 
 func isVaultAvailable() bool {
-	cmd := exec.Command("oc", "get", "pods", "-n", "vault")
+	cmd := exec.Command("oc", "get", "pods", "-n", "vault-test")
 	out, err := cmd.CombinedOutput()
 	return err == nil && strings.Contains(string(out), "vault")
 }
 
 func createVaultKVSecret(path string, data map[string]string) error {
-	args := []string{"exec", "-n", "vault", "vault-0", "--", "vault", "kv", "put", path}
+	args := []string{"exec", "-n", "vault-test", "vault-0", "--", "vault", "kv", "put", path}
 
 	for k, v := range data {
 		args = append(args, fmt.Sprintf("%s=%s", k, v))
@@ -309,7 +309,7 @@ func applyExternalSecretFromFile() error {
 func getK8sSecretValue(secretName, key string) (string, error) {
 	cmd := exec.Command(
 		"oc", "get", "secret", secretName,
-		"-n", "external-secrets-operator",
+		"-n", "vault-test",
 		"-o", "jsonpath={.data."+key+"}",
 	)
 
