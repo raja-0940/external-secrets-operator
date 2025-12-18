@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"testing"
 
-	// "time"
+	//"time"
 	// "os"
 	"os/exec"
 	"strings"
@@ -138,10 +138,11 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 	})
 
 	Context("No Vault", Label("Platform:None"), func() {
+
 		fmt.Println("Please configure a vault")
 		var (
 			vaultSecretPath    = "secret/data/e2e-test"
-			vaultK8sSecretName = "vault-e2e-test"
+			vaultK8sSecretName = "vault-output"
 			vaultSecretKey     = "username"
 			vaultSecretValue   = "admin"
 			// vaultStoreName  = "vault-store"
@@ -150,6 +151,32 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		BeforeEach(func() {
 			By("Ensuring Vault is running")
 			Expect(isVaultAvailable()).To(BeTrue())
+
+			By("Applying network policies required for Vault auth")
+			Expect(applyNetworkPolicy(
+				"/root/external-secrets-operator/test/e2e/manifests/allow-eso-to-vault.yaml",
+			)).To(Succeed())
+
+			Expect(applyNetworkPolicy(
+				"/root/external-secrets-operator/test/e2e/manifests/allow-eso-to-kube-api.yaml",
+			)).To(Succeed())
+
+			Expect(applyNetworkPolicy(
+				"/root/external-secrets-operator/test/e2e/manifests/allow-dns.yaml",
+			)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("Cleaning up network policies")
+			_ = deleteNetworkPolicy(
+				"test/e2e/manifests/allow-eso-to-vault.yaml",
+			)
+			_ = deleteNetworkPolicy(
+				"test/e2e/manifests/allow-eso-to-kube-api.yaml",
+			)
+			_ = deleteNetworkPolicy(
+				"test/e2e/manifests/allow-dns.yaml",
+			)
 		})
 
 		It("Should create secret in Vault, create SecretStore, and sync via ExternalSecret", func() {
@@ -163,6 +190,17 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			By("Applying Vault SecretStore from YAML")
 			err = applyVaultSecretStoreFromFile()
 			Expect(err).ToNot(HaveOccurred())
+
+			By("Waiting for SecretStore reconciliation")
+			//time.Sleep(120*time.Second)
+
+			Eventually(func() string {
+				cmd := exec.Command(
+					"oc", "get", "secretstore", "vault-store", "-n", "vault-test", "-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}",
+				)
+				out, _ := cmd.CombinedOutput()
+				return string(out)
+			}, "3m", "5s").Should(Equal("True"))
 
 			// By("Creating ExternalSecret to fetch Vault secret")
 			// err = createExternalSecret(
@@ -324,6 +362,24 @@ func getK8sSecretValue(secretName, key string) (string, error) {
 	}
 
 	return string(decoded), nil
+}
+
+func applyNetworkPolicy(path string) error {
+	cmd := exec.Command("oc", "apply", "-f", path)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to apply networkpolicy %s: %s", path, string(out))
+	}
+	return nil
+}
+
+func deleteNetworkPolicy(path string) error {
+	cmd := exec.Command("oc", "delete", "-f", path, "--ignore-not-found=true")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to delete networkpolicy %s: %s", path, string(out))
+	}
+	return nil
 }
 
 // Context("AWS Secret Manager", Label("Platform:AWS"), func() {
