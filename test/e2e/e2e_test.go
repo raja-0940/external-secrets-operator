@@ -23,18 +23,15 @@ import (
 	"embed"
 	"encoding/base64"
 	"fmt"
-	"testing"
-
-	//"time"
-	// "os"
 	"os/exec"
 	"strings"
+	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	// "k8s.io/apimachinery/pkg/runtime/schema"
-	// "k8s.io/client-go/dynamic"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -60,8 +57,12 @@ const (
 	operandCoreControllerPodPrefix = "external-secrets-"
 	operandCertControllerPodPrefix = "external-secrets-cert-controller-"
 	operandWebhookPodPrefix        = "external-secrets-webhook-"
-	// testNamespacePrefix            = "external-secrets-e2e-test-"
-	testNamespacePrefix = "vault-test"
+	testNamespacePrefix            = "external-secrets-e2e-test-"
+	vaultNamespace                 = "vault-test"
+	vaultManifestFile              = "testdata/vault/vault.yaml"
+	vaultServiceName               = "vault"
+	vaultNetworkPolicyFile         = "testdata/vault/vault-networkpolicy.yaml"
+	vaultAddr                      = "http://vault.vault-test.svc.cluster.local:8200"
 )
 
 const (
@@ -76,11 +77,13 @@ const (
 var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered, func() {
 	ctx := context.TODO()
 	var (
-		clientset *kubernetes.Clientset
-		// dynamicClient *dynamic.DynamicClient
-		loader utils.DynamicResourceLoader
-		// awsSecretName string
-		testNamespace string
+		clientset       *kubernetes.Clientset
+		dynamicClient   *dynamic.DynamicClient
+		loader          utils.DynamicResourceLoader
+		awsSecretName   string
+		testNamespace   string
+		vaultSecretName string
+		// expectedSecretValue []byte
 	)
 
 	BeforeAll(func() {
@@ -90,16 +93,18 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		clientset, err = kubernetes.NewForConfig(cfg)
 		Expect(err).Should(BeNil())
 
-		// dynamicClient, err = dynamic.NewForConfig(cfg)
+		dynamicClient, err = dynamic.NewForConfig(cfg)
 		Expect(err).Should(BeNil())
 
-		// awsSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
+		awsSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
+
+		vaultSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
 
 		namespace := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					"e2e-test": "true",
-					"operator": "external-secrets-operator",
+					"operator": "openshift-external-secrets-operator",
 				},
 				GenerateName: testNamespacePrefix,
 			},
@@ -108,7 +113,6 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		got, err := clientset.CoreV1().Namespaces().Create(context.Background(), namespace, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred(), "failed to create test namespace")
 		testNamespace = got.GetName()
-		// fmt.Println(testNamespace)
 
 		By("Waiting for operator pod to be ready")
 		Expect(utils.VerifyPodsReadyByPrefix(ctx, clientset, operatorNamespace, []string{
@@ -137,345 +141,465 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		})).To(Succeed())
 	})
 
-	Context("No Vault", Label("Platform:None"), func() {
-
-		fmt.Println("Please configure a vault")
-		var (
-			vaultSecretPath    = "secret/data/e2e-test"
-			vaultK8sSecretName = "vault-output"
-			vaultSecretKey     = "username"
-			vaultSecretValue   = "admin"
-			// vaultStoreName  = "vault-store"
+	Context("AWS Secret Manager", Label("Platform:AWS"), func() {
+		const (
+			clusterSecretStoreFile           = "testdata/aws_secret_store.yaml"
+			externalSecretFile               = "testdata/aws_external_secret.yaml"
+			pushSecretFile                   = "testdata/push_secret.yaml"
+			awsSecretToPushFile              = "testdata/aws_k8s_push_secret.yaml"
+			awsSecretNamePattern             = "${AWS_SECRET_KEY_NAME}"
+			awsSecretValuePattern            = "${SECRET_VALUE}"
+			awsClusterSecretStoreNamePattern = "${CLUSTERSECRETSTORE_NAME}"
+			awsSecretRegionName              = "ap-south-1"
 		)
 
-		BeforeEach(func() {
-			By("Ensuring Vault is running")
-			Expect(isVaultAvailable()).To(BeTrue())
+		AfterAll(func() {
+			By("Deleting the AWS secret")
+			Expect(utils.DeleteAWSSecret(ctx, clientset, awsSecretName, awsSecretRegionName)).
+				NotTo(HaveOccurred(), "failed to delete AWS secret test/e2e")
+		})
 
-			By("Applying network policies required for Vault auth")
-			Expect(applyNetworkPolicy(
-				"/root/external-secrets-operator/test/e2e/manifests/allow-eso-to-vault.yaml",
+		It("should create secrets mentioned in ExternalSecret using the referenced ClusterSecretStore", func() {
+			var (
+				clusterSecretStoreResourceName = fmt.Sprintf("aws-secret-store-%s", utils.GetRandomString(5))
+				pushSecretResourceName         = "aws-push-secret"
+				externalSecretResourceName     = "aws-external-secret"
+				secretResourceName             = "aws-secret"
+				keyNameInSecret                = "aws_secret_access_key"
+			)
+
+			defer func() {
+				Expect(utils.DeleteAWSSecret(ctx, clientset, awsSecretName, awsSecretRegionName)).
+					NotTo(HaveOccurred(), "failed to delete AWS secret test/e2e")
+			}()
+
+			expectedSecretValue, err := utils.ReadExpectedSecretValue(expectedSecretValueFile)
+			Expect(err).To(Succeed())
+
+			By("Creating kubernetes secret to be used in PushSecret")
+			secretsAssetFunc := utils.ReplacePatternInAsset(awsSecretValuePattern, base64.StdEncoding.EncodeToString(expectedSecretValue))
+			loader.CreateFromFile(secretsAssetFunc, awsSecretToPushFile, testNamespace)
+			defer loader.DeleteFromFile(testassets.ReadFile, awsSecretToPushFile, testNamespace)
+
+			By("Creating ClusterSecretStore")
+			cssAssetFunc := utils.ReplacePatternInAsset(awsClusterSecretStoreNamePattern, clusterSecretStoreResourceName)
+			loader.CreateFromFile(cssAssetFunc, clusterSecretStoreFile, testNamespace)
+			defer loader.DeleteFromFile(cssAssetFunc, clusterSecretStoreFile, testNamespace)
+
+			By("Waiting for ClusterSecretStore to become Ready")
+			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
+				schema.GroupVersionResource{
+					Group:    externalSecretsGroupName,
+					Version:  v1APIVersion,
+					Resource: clusterSecretStoresKind,
+				},
+				"", clusterSecretStoreResourceName, time.Minute,
 			)).To(Succeed())
 
-			Expect(applyNetworkPolicy(
-				"/root/external-secrets-operator/test/e2e/manifests/allow-eso-to-kube-api.yaml",
+			By("Creating PushSecret")
+			assetFunc := utils.ReplacePatternInAsset(awsSecretNamePattern, awsSecretName,
+				awsClusterSecretStoreNamePattern, clusterSecretStoreResourceName)
+			loader.CreateFromFile(assetFunc, pushSecretFile, testNamespace)
+			defer loader.DeleteFromFile(testassets.ReadFile, pushSecretFile, testNamespace)
+
+			By("Waiting for PushSecret to become Ready")
+			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
+				schema.GroupVersionResource{
+					Group:    externalSecretsGroupName,
+					Version:  v1alpha1APIVersion,
+					Resource: PushSecretsKind,
+				},
+				testNamespace, pushSecretResourceName, time.Minute,
 			)).To(Succeed())
 
-			Expect(applyNetworkPolicy(
-				"/root/external-secrets-operator/test/e2e/manifests/allow-dns.yaml",
+			By("Creating ExternalSecret")
+			loader.CreateFromFile(assetFunc, externalSecretFile, testNamespace)
+			defer loader.DeleteFromFile(testassets.ReadFile, externalSecretFile, testNamespace)
+
+			By("Waiting for ExternalSecret to become Ready")
+			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
+				schema.GroupVersionResource{
+					Group:    externalSecretsGroupName,
+					Version:  v1APIVersion,
+					Resource: externalSecretsKind,
+				},
+				testNamespace, externalSecretResourceName, time.Minute,
+			)).To(Succeed())
+
+			By("Waiting for target secret to be created with expected data")
+			Eventually(func(g Gomega) {
+				secret, err := loader.KubeClient.CoreV1().Secrets(testNamespace).Get(ctx, secretResourceName, metav1.GetOptions{})
+				g.Expect(err).NotTo(HaveOccurred(), "should get %s from namespace %s", secretResourceName, testNamespace)
+
+				val, ok := secret.Data[keyNameInSecret]
+				g.Expect(ok).To(BeTrue(), "%s should be present in secret %s", keyNameInSecret, secret.Name)
+
+				g.Expect(val).To(Equal(expectedSecretValue), "%s does not match expected value", keyNameInSecret)
+			}, time.Minute, 10*time.Second).Should(Succeed())
+		})
+	})
+
+	// TODO: Update vault.yaml
+	Context("Vault Secret Manager", Label("Platform:Vault"), func() {
+		const (
+			clusterSecretStoreFile        = "testdata/vault/secret_store.yaml"
+			externalSecretFile            = "testdata/vault/external_secret.yaml"
+			pushSecretFile                = "testdata/vault/push_secret.yaml"
+			secretToPushFile              = "testdata/vault/push_secret.yaml"
+			secretNamePattern             = "${SECRET_KEY_NAME}"
+			secretValuePattern            = "${SECRET_VALUE}"
+			clusterSecretStoreNamePattern = "${CLUSTERSECRETSTORE_NAME}"
+			secretRegionName              = ""
+		)
+
+		BeforeAll(func() {
+			By("Deploying Vault using testdata/vault/vault.yaml")
+			Expect(applyVault(ctx, loader)).To(Succeed())
+
+			By("Waiting for Vault pod to be ready")
+			Expect(waitForVaultPod(ctx, clientset)).To(Succeed())
+
+			By("Applying NetworkPolicy for Vault namespace")
+			loader.CreateFromFile(
+				testassets.ReadFile,
+				vaultNetworkPolicyFile,
+				"",
+			)
+
+			By("Initializing and unsealing Vault")
+			token, err := initAndUnsealVault(ctx, clientset)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Configuring Vault Kubernetes auth")
+			Expect(configureVaultK8sAuth(ctx, clientset, token)).To(Succeed())
+			Expect(configureVaultK8sConfig(ctx, clientset, token)).To(Succeed())
+
+			By("Enable KVEngine")
+			Expect(enableKVEngine(ctx, clientset, token)).To(Succeed())
+
+			By("Creating Vault policy")
+			Expect(createVaultPolicy(ctx, clientset, token)).To(Succeed())
+
+			By("Creating Vault ESO role")
+			Expect(createVaultRole(ctx, clientset, token)).To(Succeed())
+
+			By("Create a vault test secret")
+			vaultexpectedSecretValue := []byte("eso-e2e-sample-value")
+			fmt.Println("Expected secret vaule is: ", vaultexpectedSecretValue)
+			Expect(createVaultTestSecret(
+				ctx,
+				clientset,
+				token,
+				vaultSecretName,
+				base64.StdEncoding.EncodeToString(vaultexpectedSecretValue),
 			)).To(Succeed())
 		})
 
-		AfterEach(func() {
-			By("Cleaning up network policies")
-			_ = deleteNetworkPolicy(
-				"test/e2e/manifests/allow-eso-to-vault.yaml",
-			)
-			_ = deleteNetworkPolicy(
-				"test/e2e/manifests/allow-eso-to-kube-api.yaml",
-			)
-			_ = deleteNetworkPolicy(
-				"test/e2e/manifests/allow-dns.yaml",
-			)
+		AfterAll(func() {
+			By("Deleting the Vault secret")
+			// TODO: make a similar method/approach that checks to see that the secret is deleted.
+			Expect(utils.DeleteVaultSecret(ctx, clientset, testNamespace, vaultSecretName)).
+				NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")
+
 		})
 
-		It("Should create secret in Vault, create SecretStore, and sync via ExternalSecret", func() {
+		It("should create secrets mentioned in ExternalSecret using the referenced ClusterSecretStore", func() {
+			var (
+				// test bindata for Vault
+				vaultExternalSecretConfigFile  = "testdata/vault/external_secret_config.yaml"
+				vaultClusterSecretStoreFile    = "testdata/vault/cluster_secret_store.yaml"
+				vaultExternalSecretFile        = "testdata/vault/external_secret.yaml"
+				vaultPushSecretFile            = "testdata/vault/push_secret.yaml"
+				clusterSecretStoreResourceName = fmt.Sprintf("vault-secret-store-%s", utils.GetRandomString(5))
+				pushSecretResourceName         = "vault-push-secret"
+				externalSecretResourceName     = "vault-external-secret"
+				secretResourceName             = "vault-secret"
+				keyNameInSecret                = "vault_secret_access_key"
+			)
 
-			By("Creating secret directly in Vault")
-			err := createVaultKVSecret(vaultSecretPath, map[string]string{
-				vaultSecretKey: vaultSecretValue,
-			})
-			Expect(err).ToNot(HaveOccurred())
+			defer func() {
+				// TODO: make a similar method/approach that checks to see that the secret is deleted.
+				Expect(utils.DeleteVaultSecret(ctx, clientset, testNamespace, vaultSecretName)).
+					NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")
+			}()
 
-			By("Applying Vault SecretStore from YAML")
-			err = applyVaultSecretStoreFromFile()
-			Expect(err).ToNot(HaveOccurred())
+			expectedSecretValue, err := utils.ReadExpectedSecretValue(expectedSecretValueFile)
+			Expect(err).To(Succeed())
 
-			By("Waiting for SecretStore reconciliation")
-			//time.Sleep(120*time.Second)
+			By("Creating kubernetes secret to be used in PushSecret")
+			secretsAssetFunc := utils.ReplacePatternInAsset(secretValuePattern, base64.StdEncoding.EncodeToString(expectedSecretValue))
+			loader.CreateFromFile(secretsAssetFunc, vaultPushSecretFile, testNamespace)
+			defer loader.DeleteFromFile(testassets.ReadFile, vaultPushSecretFile, testNamespace)
 
-			Eventually(func() string {
-				cmd := exec.Command(
-					"oc", "get", "secretstore", "vault-store", "-n", "vault-test", "-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}",
-				)
-				out, _ := cmd.CombinedOutput()
-				return string(out)
-			}, "3m", "5s").Should(Equal("True"))
+			// create external secret config using vaultExternalSecretConfigFile
+			_ = vaultExternalSecretConfigFile
 
-			// By("Creating ExternalSecret to fetch Vault secret")
-			// err = createExternalSecret(
-			// 	vaultK8sSecretName,
-			// 	vaultStoreName,
-			// 	vaultSecretPath,
-			// 	vaultSecretKey,
-			// 	vaultSecretKey,
-			// )
-			// Expect(err).ToNot(HaveOccurred())
+			// create external secret config using vaultExternalSecretConfigFile
 
-			By("Applying Vault ExternalSecret from YAML")
-			err = applyExternalSecretFromFile()
-			Expect(err).ToNot(HaveOccurred())
+			By("Creating ClusterSecretStore")
+			cssAssetFunc := utils.ReplacePatternInAsset(clusterSecretStoreNamePattern, clusterSecretStoreResourceName)
+			loader.CreateFromFile(cssAssetFunc, vaultClusterSecretStoreFile, testNamespace)
+			defer loader.DeleteFromFile(cssAssetFunc, vaultClusterSecretStoreFile, testNamespace)
 
-			By("Validating that Kubernetes secret is created")
-			Eventually(func() (string, error) {
-				return getK8sSecretValue(vaultK8sSecretName, vaultSecretKey)
-			}, "2m", "5s").Should(Equal(vaultSecretValue))
+			By("Waiting for ClusterSecretStore to become Ready")
+			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
+				schema.GroupVersionResource{
+					Group:    externalSecretsGroupName,
+					Version:  v1APIVersion,
+					Resource: clusterSecretStoresKind,
+				},
+				"", clusterSecretStoreResourceName, time.Minute,
+			)).To(Succeed())
+
+			By("Creating PushSecret")
+			assetFunc := utils.ReplacePatternInAsset(secretNamePattern, vaultSecretName,
+				clusterSecretStoreNamePattern, clusterSecretStoreResourceName)
+			loader.CreateFromFile(assetFunc, vaultPushSecretFile, testNamespace)
+			defer loader.DeleteFromFile(testassets.ReadFile, vaultPushSecretFile, testNamespace)
+
+			By("Waiting for PushSecret to become Ready")
+			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
+				schema.GroupVersionResource{
+					Group:    externalSecretsGroupName,
+					Version:  v1alpha1APIVersion,
+					Resource: PushSecretsKind,
+				},
+				testNamespace, pushSecretResourceName, time.Minute,
+			)).To(Succeed())
+
+			By("Creating ExternalSecret")
+			loader.CreateFromFile(assetFunc, vaultExternalSecretFile, testNamespace)
+			defer loader.DeleteFromFile(testassets.ReadFile, vaultExternalSecretFile, testNamespace)
+
+			By("Waiting for ExternalSecret to become Ready")
+			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
+				schema.GroupVersionResource{
+					Group:    externalSecretsGroupName,
+					Version:  v1APIVersion,
+					Resource: externalSecretsKind,
+				},
+				testNamespace, externalSecretResourceName, time.Minute,
+			)).To(Succeed())
+
+			By("Waiting for target secret to be created with expected data")
+			Eventually(func(g Gomega) {
+				secret, err := loader.KubeClient.CoreV1().Secrets(testNamespace).Get(ctx, secretResourceName, metav1.GetOptions{})
+				g.Expect(err).NotTo(HaveOccurred(), "should get %s from namespace %s", secretResourceName, testNamespace)
+
+				val, ok := secret.Data[keyNameInSecret]
+				g.Expect(ok).To(BeTrue(), "%s should be present in secret %s", keyNameInSecret, secret.Name)
+
+				g.Expect(val).To(Equal(expectedSecretValue), "%s does not match expected value", keyNameInSecret)
+			}, time.Minute, 10*time.Second).Should(Succeed())
 		})
 	})
 })
 
-func isVaultAvailable() bool {
-	cmd := exec.Command("oc", "get", "pods", "-n", "vault-test")
-	out, err := cmd.CombinedOutput()
-	return err == nil && strings.Contains(string(out), "vault")
-}
+// Apply vault manifest
+func applyVault(ctx context.Context, loader utils.DynamicResourceLoader) error {
 
-func createVaultKVSecret(path string, data map[string]string) error {
-	args := []string{"exec", "-n", "vault-test", "vault-0", "--", "vault", "kv", "put", path}
-
-	for k, v := range data {
-		args = append(args, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	cmd := exec.Command("oc", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to create vault secret: %s", string(out))
-	}
-	return nil
-}
-
-// func createVaultSecretStore(storeName string) error {
-// 	ss := fmt.Sprintf(`
-// apiVersion: external-secrets.io/v1
-// kind: SecretStore
-// metadata
-//   name: %s
-//   namespace: external-secrets-operator
-// spec:
-//   provider:
-//     vault:
-//       server: http://vault1.external-secrets-operator.svc.cluster.local:8200
-//       path: secret
-//       version: v2
-//       auth:
-//         kubernetes:
-// 	  mountPath: kubernetes
-// 	  role: eso-role
-// 	  serverAccountRef:
-// 	    name: external-secrets-operator-controller-manager
-// `, storeName)
-
-// 	tmpFile := "/tmp/vault-secretstore.yaml"
-// 	err := os.WriteFile(tmpFile, []byte(ss), 0644)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	cmd := exec.Command("oc", "apply", "-f", tmpFile)
-// 	out, err := cmd.CombinedOutput()
-// 	if err != nil {
-// 		return fmt.Errorf("failed to create SecretStore: %s", string(out))
-// 	}
-
-// 	return nil
-// }
-
-func applyVaultSecretStoreFromFile() error {
-
-	path := "/root/external-secrets-operator/test/e2e/manifests/vault-secretstore.yaml"
-
-	cmd := exec.Command("oc", "apply", "-f", path)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to apply Vault SecretStore YAML: %s", string(out))
-	}
-	return nil
-}
-
-// func createExternalSecret(
-// 	name, storeName, remoteKey, remoteProperty, targetKey string,
-// ) error {
-
-// 	es := fmt.Sprintf(`
-// apiVersion: external-secrets.io/v1
-// kind: ExternalSecret
-// metadata:
-//   name: %s
-//   namespace: external-secrets-operator
-// spec:
-//   refreshInterval: 10s
-//   secretStoreRef:
-//     name: %s
-//     kind: SecretStore
-//   target:
-//     name: %s
-//   data:
-//   - secretKey: %s
-//     remoteRef:
-//       key: %s
-//       property: %s
-// `, name, storeName, name, targetKey, remoteKey, remoteProperty)
-
-// 	tmpFile := "/tmp/vault-es.yaml"
-// 	err := os.WriteFile(tmpFile, []byte(es), 0644)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	cmd := exec.Command("oc", "apply", "-f", tmpFile)
-// 	out, err := cmd.CombinedOutput()
-// 	if err != nil {
-// 		return fmt.Errorf("faile to create ExternalSecret: %s", string(out))
-// 	}
-
-// 	return nil
-// }
-
-func applyExternalSecretFromFile() error {
-	path := "/root/external-secrets-operator/test/e2e/manifests/vault-secretstore.yaml"
-
-	cmd := exec.Command("oc", "apply", "-f", path)
-
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to apply ExternalSecret YAML: %s", string(out))
-	}
-	return nil
-}
-
-func getK8sSecretValue(secretName, key string) (string, error) {
-	cmd := exec.Command(
-		"oc", "get", "secret", secretName,
-		"-n", "vault-test",
-		"-o", "jsonpath={.data."+key+"}",
+	cmd := exec.CommandContext(ctx,
+		"oc",
+		"apply",
+		"-f",
+		vaultManifestFile,
 	)
 
 	out, err := cmd.CombinedOutput()
+	fmt.Println(string(out))
+
+	if err != nil {
+		return fmt.Errorf("Failed to apply vault manifest: %w", err)
+	}
+
+	return nil
+}
+
+// wait for vault pod
+func waitForVaultPod(ctx context.Context, client *kubernetes.Clientset) error {
+	return utils.VerifyPodsReadyByPrefix(
+		ctx,
+		client,
+		vaultNamespace,
+		[]string{"vault"},
+	)
+}
+
+// initAndUnsealVault initializes and unselas the Vault instance running in the test namespace, then returns the generated root token.
+// it executes the vault CLi commands inside the vault pod and extracts the unseal key and root token from the output,
+// and prepares vault for further configuration in E2E tests.
+func initAndUnsealVault(ctx context.Context, client *kubernetes.Clientset) (string, error) {
+	podName, err := getVaultPodName(ctx, client)
 	if err != nil {
 		return "", err
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(string(out))
+	cmd := exec.Command(
+		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
+		`
+vault operator init -key-shares=1 -key-threshold=1 > /tmp/init.out &&
+UNSEAL_KEY=$(grep 'Unseal Key 1:' /tmp/init.out | awk '{print $NF}') &&
+ROOT_TOKEN=$(grep 'Initial Root Token:' /tmp/init.out | awk '{print $NF}') &&
+vault operator unseal $UNSEAL_KEY &&
+echo $ROOT_TOKEN
+		`,
+	)
+
+	out, err := utils.Run(cmd)
 	if err != nil {
 		return "", err
 	}
 
-	return string(decoded), nil
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	token := strings.TrimSpace(lines[len(lines)-1])
+	return token, nil
 }
 
-func applyNetworkPolicy(path string) error {
-	cmd := exec.Command("oc", "apply", "-f", path)
-	out, err := cmd.CombinedOutput()
+func getVaultPodName(ctx context.Context, clientset *kubernetes.Clientset) (string, error) {
+	pods, err := clientset.CoreV1().
+		Pods(vaultNamespace).
+		List(ctx, metav1.ListOptions{
+			LabelSelector: "app=vault",
+		})
 	if err != nil {
-		return fmt.Errorf("failed to apply networkpolicy %s: %s", path, string(out))
+		return "", err
 	}
-	return nil
+	for _, pod := range pods.Items {
+		if pod.Status.Phase == corev1.PodRunning {
+			return pod.Name, nil
+		}
+	}
+	return "", fmt.Errorf("no running vault pod found")
 }
 
-func deleteNetworkPolicy(path string) error {
-	cmd := exec.Command("oc", "delete", "-f", path, "--ignore-not-found=true")
-	out, err := cmd.CombinedOutput()
+// Enable kubernetes auth in vault
+func configureVaultK8sAuth(ctx context.Context, client *kubernetes.Clientset, token string) error {
+
+	podName, err := getVaultPodName(ctx, client)
 	if err != nil {
-		return fmt.Errorf("failed to delete networkpolicy %s: %s", path, string(out))
+		return err
 	}
-	return nil
+
+	fmt.Println("Token passed to configureVaultK8sAuth: ", token)
+
+	cmd := exec.Command(
+		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
+		fmt.Sprintf(
+			"export VAULT_TOKEN=%s && vault auth enable kubernetes || true",
+			token,
+		),
+	)
+
+	_, err = utils.Run(cmd)
+	return err
 }
 
-// Context("AWS Secret Manager", Label("Platform:AWS"), func() {
-// 	const (
-// 		clusterSecretStoreFile           = "testdata/aws_secret_store.yaml"
-// 		externalSecretFile               = "testdata/aws_external_secret.yaml"
-// 		pushSecretFile                   = "testdata/push_secret.yaml"
-// 		awsSecretToPushFile              = "testdata/aws_k8s_push_secret.yaml"
-// 		awsSecretNamePattern             = "${AWS_SECRET_KEY_NAME}"
-// 		awsSecretValuePattern            = "${SECRET_VALUE}"
-// 		awsClusterSecretStoreNamePattern = "${CLUSTERSECRETSTORE_NAME}"
-// 		awsSecretRegionName              = "ap-south-1"
-// 	)
+// configure kubernetes auth
+func configureVaultK8sConfig(ctx context.Context, client *kubernetes.Clientset, token string) error {
 
-// 	AfterAll(func() {
-// 		By("Deleting the AWS secret")
-// 		Expect(utils.DeleteAWSSecret(ctx, clientset, awsSecretName, awsSecretRegionName)).
-// 			NotTo(HaveOccurred(), "failed to delete AWS secret test/e2e")
-// 	})
+	podName, err := getVaultPodName(ctx, client)
+	if err != nil {
+		return err
+	}
 
-// 	It("should create secrets mentioned in ExternalSecret using the referenced ClusterSecretStore", func() {
-// 		var (
-// 			clusterSecretStoreResourceName = fmt.Sprintf("aws-secret-store-%s", utils.GetRandomString(5))
-// 			pushSecretResourceName         = "aws-push-secret"
-// 			externalSecretResourceName     = "aws-external-secret"
-// 			secretResourceName             = "aws-secret"
-// 			keyNameInSecret                = "aws_secret_access_key"
-// 		)
+	cmd := exec.Command(
+		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
+		fmt.Sprintf(`
+export VAULT_TOKEN=%s
+vault write auth/kubernetes/config \
+  kubernetes_host="https://kubernetes.default.svc" \
+  issuer="https://kubernetes.default.svc"
+`, token),
+	)
 
-// 		defer func() {
-// 			Expect(utils.DeleteAWSSecret(ctx, clientset, awsSecretName, awsSecretRegionName)).
-// 				NotTo(HaveOccurred(), "failed to delete AWS secret test/e2e")
-// 		}()
+	_, err = utils.Run(cmd)
+	return err
+}
 
-// 		expectedSecretValue, err := utils.ReadExpectedSecretValue(expectedSecretValueFile)
-// 		Expect(err).To(Succeed())
+// Enable KV engine
+func enableKVEngine(ctx context.Context, client *kubernetes.Clientset, token string) error {
+	podName, err := getVaultPodName(ctx, client)
+	if err != nil {
+		return err
+	}
 
-// 		By("Creating kubernetes secret to be used in PushSecret")
-// 		secretsAssetFunc := utils.ReplacePatternInAsset(awsSecretValuePattern, base64.StdEncoding.EncodeToString(expectedSecretValue))
-// 		loader.CreateFromFile(secretsAssetFunc, awsSecretToPushFile, testNamespace)
-// 		defer loader.DeleteFromFile(testassets.ReadFile, awsSecretToPushFile, testNamespace)
+	cmd := exec.Command(
+		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
+		fmt.Sprintf(`
+export VAULT_TOKEN=%s
+vault secrets enable -path=secret kv-v2 || true
+`, token),
+	)
 
-// 		By("Creating ClusterSecretStore")
-// 		cssAssetFunc := utils.ReplacePatternInAsset(awsClusterSecretStoreNamePattern, clusterSecretStoreResourceName)
-// 		loader.CreateFromFile(cssAssetFunc, clusterSecretStoreFile, testNamespace)
-// 		defer loader.DeleteFromFile(cssAssetFunc, clusterSecretStoreFile, testNamespace)
+	_, err = utils.Run(cmd)
+	return err
+}
 
-// 		By("Waiting for ClusterSecretStore to become Ready")
-// 		Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
-// 			schema.GroupVersionResource{
-// 				Group:    externalSecretsGroupName,
-// 				Version:  v1APIVersion,
-// 				Resource: clusterSecretStoresKind,
-// 			},
-// 			"", clusterSecretStoreResourceName, time.Minute,
-// 		)).To(Succeed())
+// Create Vault policy
 
-// 		By("Creating PushSecret")
-// 		assetFunc := utils.ReplacePatternInAsset(awsSecretNamePattern, awsSecretName,
-// 			awsClusterSecretStoreNamePattern, clusterSecretStoreResourceName)
-// 		loader.CreateFromFile(assetFunc, pushSecretFile, testNamespace)
-// 		defer loader.DeleteFromFile(testassets.ReadFile, pushSecretFile, testNamespace)
+func createVaultPolicy(ctx context.Context, client *kubernetes.Clientset, token string) error {
+	podName, err := getVaultPodName(ctx, client)
+	if err != nil {
+		return err
+	}
+	policy := `
+path "secret/*" {
+  capabilities = ["create", "update", "read", "delete", "list"]
+}
+`
+	cmd := exec.Command(
+		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
+		fmt.Sprintf(`
+export VAULT_TOKEN=%s
+cat <<EOF > /tmp/eso-policy.hcl
+%s
+EOF
+vault policy write eso-policy /tmp/eso-policy.hcl
+`, token, policy),
+	)
 
-// 		By("Waiting for PushSecret to become Ready")
-// 		Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
-// 			schema.GroupVersionResource{
-// 				Group:    externalSecretsGroupName,
-// 				Version:  v1alpha1APIVersion,
-// 				Resource: PushSecretsKind,
-// 			},
-// 			testNamespace, pushSecretResourceName, time.Minute,
-// 		)).To(Succeed())
+	_, err = utils.Run(cmd)
+	return err
+}
 
-// 		By("Creating ExternalSecret")
-// 		loader.CreateFromFile(assetFunc, externalSecretFile, testNamespace)
-// 		defer loader.DeleteFromFile(testassets.ReadFile, externalSecretFile, testNamespace)
+// Create ESO vault role
+func createVaultRole(ctx context.Context, client *kubernetes.Clientset, token string) error {
 
-// 		By("Waiting for ExternalSecret to become Ready")
-// 		Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
-// 			schema.GroupVersionResource{
-// 				Group:    externalSecretsGroupName,
-// 				Version:  v1APIVersion,
-// 				Resource: externalSecretsKind,
-// 			},
-// 			testNamespace, externalSecretResourceName, time.Minute,
-// 		)).To(Succeed())
+	podName, err := getVaultPodName(ctx, client)
+	if err != nil {
+		return err
+	}
 
-// 		By("Waiting for target secret to be created with expected data")
-// 		Eventually(func(g Gomega) {
-// 			secret, err := loader.KubeClient.CoreV1().Secrets(testNamespace).Get(ctx, secretResourceName, metav1.GetOptions{})
-// 			g.Expect(err).NotTo(HaveOccurred(), "should get %s from namespace %s", secretResourceName, testNamespace)
+	cmd := exec.Command(
+		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
+		fmt.Sprintf(`
+export VAULT_TOKEN=%s
+vault write auth/kubernetes/role/eso-role \
+  bound_service_account_names=external-secrets \
+  bound_service_account_namespaces=external-secrets \
+  policies=eso-policy \
+  ttl=1h
+`, token),
+	)
 
-// 			val, ok := secret.Data[keyNameInSecret]
-// 			g.Expect(ok).To(BeTrue(), "%s should be present in secret %s", keyNameInSecret, secret.Name)
+	_, err = utils.Run(cmd)
+	return err
+}
 
-// 			g.Expect(val).To(Equal(expectedSecretValue), "%s does not match expected value", keyNameInSecret)
-// 		}, time.Minute, 10*time.Second).Should(Succeed())
-// 	})
-// })
+func createVaultTestSecret(ctx context.Context, client *kubernetes.Clientset, token string, key, value string) error {
+	podName, err := getVaultPodName(ctx, client)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command(
+		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
+		fmt.Sprintf(
+			"export VAULT_TOKEN=%s && vault kv put secret/%s %s=\"%s\"",
+			token, key, key, value,
+		),
+	)
+
+	_, err = utils.Run(cmd)
+	return err
+}
