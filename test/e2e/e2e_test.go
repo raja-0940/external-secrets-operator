@@ -75,6 +75,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		loader        utils.DynamicResourceLoader
 		awsSecretName string
 		testNamespace string
+		secretName    string
 	)
 
 	BeforeAll(func() {
@@ -238,12 +239,13 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			secretNamePattern             = "${SECRET_KEY_NAME}"
 			secretValuePattern            = "${SECRET_VALUE}"
 			clusterSecretStoreNamePattern = "${CLUSTERSECRETSTORE_NAME}"
+			secretRegionName              = ""
 		)
 
 		AfterAll(func() {
 			By("Deleting the Vault secret")
 			// TODO: make a similar method/approach that checks to see that the secret is deleted.
-			Expect(utils.DeleteVaultSecret(ctx, clientset, secretName, secretRegionName)).
+			Expect(utils.DeleteVaultSecret(ctx, clientset, secretName)).
 				NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")
 		})
 
@@ -263,7 +265,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 			defer func() {
 				// TODO: make a similar method/approach that checks to see that the secret is deleted.
-				Expect(utils.DeleteVaultSecret(ctx, clientset, secretName, secretRegionName)).
+				Expect(utils.DeleteVaultSecret(ctx, clientset, secretName)).
 					NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")
 			}()
 
@@ -274,6 +276,8 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			secretsAssetFunc := utils.ReplacePatternInAsset(secretValuePattern, base64.StdEncoding.EncodeToString(expectedSecretValue))
 			loader.CreateFromFile(secretsAssetFunc, vaultPushSecretFile, testNamespace)
 			defer loader.DeleteFromFile(testassets.ReadFile, vaultPushSecretFile, testNamespace)
+
+			// create external secret config using vaultExternalSecretConfigFile
 
 			By("Creating ClusterSecretStore")
 			cssAssetFunc := utils.ReplacePatternInAsset(clusterSecretStoreNamePattern, clusterSecretStoreResourceName)
