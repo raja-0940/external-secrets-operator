@@ -276,6 +276,8 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			secretsAssetFunc := utils.ReplacePatternInAsset(secretValuePattern, base64.StdEncoding.EncodeToString(expectedSecretValue))
 			loader.CreateFromFile(secretsAssetFunc, vaultPushSecretFile, testNamespace)
 			defer loader.DeleteFromFile(testassets.ReadFile, vaultPushSecretFile, testNamespace)
+			
+			// create external secret config using vaultExternalSecretConfigFile
 
 			// create external secret config using vaultExternalSecretConfigFile
 
