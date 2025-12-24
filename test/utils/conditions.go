@@ -27,6 +27,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -203,6 +204,12 @@ func ReplacePatternInAsset(replacePatternString ...string) AssetFunc {
 	}
 }
 
-func DeleteVaultSecret(ctx context.Context, k8sClient *kubernetes.Clientset, secretName, region string) error {
-	return nil
+func DeleteVaultSecret(ctx context.Context, k8sClient *kubernetes.Clientset, namespace string, secretName string) error {
+	err := k8sClient.CoreV1().Secrets(namespace).Delete(ctx, secretName, metav1.DeleteOptions{})
+	
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	
+	return err
 }

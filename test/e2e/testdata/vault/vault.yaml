@@ -56,8 +56,13 @@ spec:
           env:
 		    - name: VAULT_ADDR
               value: "http://127.0.0.1:8200"
-			- name: VAULT_DEV_ROOT_TOKEN_ID
-			  value: "${VAULT_ROOT_TOKEN}"
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health
+              port: 8200
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12
           volumeMounts:
 		    - name: config
               mountPath: /vault/config

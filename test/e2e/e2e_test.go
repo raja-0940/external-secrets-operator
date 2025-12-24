@@ -249,7 +249,14 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		)
 		
 		BeforeAll(func() {
-			By("Deploying Vault")
+			By("Applying NetworkPolicy for Vault namespace")
+			loader.CreateFromFile(
+				testassets.ReadFile,
+				"test/e2e/testdata/vault/vault-networkpolicy.yaml",
+				"",
+			)
+			
+			By("Deploying Vault (creates namespace)")
 			Expect(applyVault(ctx, loader)).To(Succeed())
 
 			By("Waiting for Vault pod")
@@ -264,14 +271,16 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			Expect(configureVaultK8sConfig(ctx, token)).To(Succeed())
 
 			By("Creating Vault ESO role")
-			Expect(createVaultRole(ctx, token)).To(Succeed())
+			Expect(createVaultRole(ctx, token)).To(Succeed())		
+			
 		})
 
 		AfterAll(func() {
 			By("Deleting the Vault secret")
 			// TODO: make a similar method/approach that checks to see that the secret is deleted.
-			Expect(utils.DeleteVaultSecret(ctx, clientset, secretName)).
-				NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")
+			Expect(utils.DeleteVaultSecret(ctx, clientset, testNamespace, secretName)).
+				NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")			
+			
 		})
 
 		It("should create secrets mentioned in ExternalSecret using the referenced ClusterSecretStore", func() {
@@ -290,7 +299,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 			defer func() {
 				// TODO: make a similar method/approach that checks to see that the secret is deleted.
-				Expect(utils.DeleteVaultSecret(ctx, clientset, secretName)).
+				Expect(utils.DeleteVaultSecret(ctx, clientset, testNamespace, secretName)).
 					NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")
 			}()
 
