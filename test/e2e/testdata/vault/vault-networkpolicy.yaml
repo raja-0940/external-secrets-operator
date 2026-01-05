@@ -1,16 +1,36 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-kube-apiserver
+  name: allow-kube-essential
   namespace: vault-test
 spec:
   podSelector: {}    
   policyTypes:
   - Ingress
   - Egress
+  
   ingress:
-  - from:    
-    - namespaceSelector: {}    
+  - from:
+    - podSelector: {}
+    - namespaceSelector: {}
+    
   egress:
   - to:
-    - namespaceSelector: {}
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: TCP
+      port: 443
+      
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+      
+  - to:
+    - podSelector: {}

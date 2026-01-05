@@ -58,10 +58,11 @@ const (
 	operandCertControllerPodPrefix = "external-secrets-cert-controller-"
 	operandWebhookPodPrefix        = "external-secrets-webhook-"
 	testNamespacePrefix            = "external-secrets-e2e-test-"
-	vaultNamespace                = "vault-test"
-	vaultManifestFile             = "testdata/vault/vault.yaml"
-	vaultServiceName              = "vault"
-	vaultAddr                     = "http://vault.vault-test.svc.cluster.local:8200"
+	vaultNamespace                 = "vault-test"
+	vaultManifestFile              = "testdata/vault/vault.yaml"
+	vaultServiceName               = "vault"
+	vaultNetworkPolicyFile         = "testdata/vault/vault-networkpolicy.yaml"
+	vaultAddr                      = "http://vault.vault-test.svc.cluster.local:8200"
 )
 
 const (
@@ -249,18 +250,18 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		)
 		
 		BeforeAll(func() {
+			By("Deploying Vault (creates namespace)")
+			Expect(applyVault(ctx, loader)).To(Succeed())
+			
 			By("Applying NetworkPolicy for Vault namespace")
 			loader.CreateFromFile(
 				testassets.ReadFile,
-				"test/e2e/testdata/vault/vault-networkpolicy.yaml",
+				vaultNetworkPolicyFile,
 				"",
-			)
+			)			
 			
-			By("Deploying Vault (creates namespace)")
-			Expect(applyVault(ctx, loader)).To(Succeed())
-
 			By("Waiting for Vault pod")
-			Expect(waitForVaultPod(ctx, clientset)).To(Succeed())
+			Expect(waitForVaultPod(ctx, clientset)).To(Succeed())						
 
 			By("Initializing and unsealing Vault")
 			token, err := initAndUnsealVault(ctx, clientset)
@@ -272,7 +273,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 			By("Creating Vault ESO role")
 			Expect(createVaultRole(ctx, token)).To(Succeed())		
-			
+						
 		})
 
 		AfterAll(func() {
