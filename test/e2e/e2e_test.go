@@ -77,12 +77,12 @@ const (
 var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered, func() {
 	ctx := context.TODO()
 	var (
-		clientset     *kubernetes.Clientset
-		dynamicClient *dynamic.DynamicClient
-		loader        utils.DynamicResourceLoader
-		awsSecretName string
-		testNamespace string
-		secretName    string
+		clientset       *kubernetes.Clientset
+		dynamicClient   *dynamic.DynamicClient
+		loader          utils.DynamicResourceLoader
+		awsSecretName   string
+		testNamespace   string
+		vaultSecretName string
 	)
 
 	BeforeAll(func() {
@@ -96,6 +96,8 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		Expect(err).Should(BeNil())
 
 		awsSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
+		
+		vaultSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
 
 		namespace := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
@@ -279,7 +281,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		AfterAll(func() {
 			By("Deleting the Vault secret")
 			// TODO: make a similar method/approach that checks to see that the secret is deleted.
-			Expect(utils.DeleteVaultSecret(ctx, clientset, testNamespace, secretName)).
+			Expect(utils.DeleteVaultSecret(ctx, clientset, testNamespace, vaultSecretName)).
 				NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")
 
 		})
@@ -300,7 +302,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 			defer func() {
 				// TODO: make a similar method/approach that checks to see that the secret is deleted.
-				Expect(utils.DeleteVaultSecret(ctx, clientset, testNamespace, secretName)).
+				Expect(utils.DeleteVaultSecret(ctx, clientset, testNamespace, vaultSecretName)).
 					NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")
 			}()
 
@@ -333,7 +335,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			)).To(Succeed())
 
 			By("Creating PushSecret")
-			assetFunc := utils.ReplacePatternInAsset(secretNamePattern, secretName,
+			assetFunc := utils.ReplacePatternInAsset(secretNamePattern, vaultSecretName,
 				clusterSecretStoreNamePattern, clusterSecretStoreResourceName)
 			loader.CreateFromFile(assetFunc, vaultPushSecretFile, testNamespace)
 			defer loader.DeleteFromFile(testassets.ReadFile, vaultPushSecretFile, testNamespace)

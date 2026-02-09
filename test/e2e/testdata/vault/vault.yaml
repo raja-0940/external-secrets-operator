@@ -3,12 +3,14 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: vault-test
+
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: vault
   namespace: vault-test
+
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -18,14 +20,18 @@ metadata:
 data:
   vault.hcl: |
     ui = true
+
     listener "tcp" {
-      address = "0.0.0.0:8200"
+      address     = "0.0.0.0:8200"
       tls_disable = 1
     }
+
     storage "file" {
       path = "/vault/data"
     }
+
     disable_mlock = true
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -44,37 +50,41 @@ spec:
     spec:
       serviceAccountName: vault
       securityContext:
-        fsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-	    - name: vault
+        - name: vault
           image: icr.io/ppc64le-oss/vault-ppc64le:v1.14.8
-		  args:
-		    - "server"
-			- "-config=/vault/config/vault.hcl"
+          command: ["vault"]
+          args:
+            - server
+            - -config=/vault/config/vault.hcl          
           ports:
-		    - containerPort: 8200
-          env:
-		    - name: VAULT_ADDR
-              value: "http://127.0.0.1:8200"
+            - containerPort: 8200          
+          securityContext:            
+            allowPrivilegeEscalation: false            
+            capabilities:
+              drop:
+                - ALL              
+          volumeMounts:
+            - name: config
+              mountPath: /vault/config
+            - name: data
+              mountPath: /vault/data
           readinessProbe:
             httpGet:
-              path: /v1/sys/health
+              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
               port: 8200
             initialDelaySeconds: 10
             periodSeconds: 5
-            failureThreshold: 12
-          volumeMounts:
-		    - name: config
-              mountPath: /vault/config
-			- name: data
-              mountPath: /vault/data
-	
       volumes:
-	    - name: config
+        - name: config
           configMap:
             name: vault-config
-		- name: data
+        - name: data
           emptyDir: {}
+
 ---
 apiVersion: v1
 kind: Service
@@ -85,6 +95,7 @@ spec:
   selector:
     app: vault
   ports:
-name: http
+    - name: http
       port: 8200
       targetPort: 8200
+
