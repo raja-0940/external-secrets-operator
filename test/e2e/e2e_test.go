@@ -256,6 +256,19 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			By("Deploying Vault using testdata/vault/vault.yaml")
 			Expect(applyVault(ctx, loader)).To(Succeed())
 
+			By("DEBUG: Listening pods in vault-test namespace")
+			cmd := exec.Command("oc", "get", "all", "-n", vaultNamespace)
+			out, _ := cmd.CombinedOutput()
+			fmt.Fprintln(Ginkgowriter, string(out))
+
+			By("Waiting for vault-test namespace to exist")
+			Eventually(func() error {
+				_, err := clientset.CoreV1().
+					Namespaces().
+					Get(ctx, vaultNamespace, metav1.GetOptions{})
+				return err
+			}, time.Minute, 5*time.Second).Should(Succeed())
+
 			By("Applying NetworkPolicy for Vault namespace")
 			loader.CreateFromFile(
 				testassets.ReadFile,
@@ -264,9 +277,12 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			)
 
 			By("Waiting for Vault pod to be ready")
-			Eventually(func() error {
-				return waitForVaultPod(ctx, clientset)
-			}, 2*time.Minute, 5*time.Second).Should(Succeed())
+			Expect(utils.VerifyPodsReadyByPrefix(
+				ctx,
+				clientset,
+				vaultNamespace,
+				[]string{"vault"},
+			)).To(Succeed())
 
 			By("Initializing and unsealing Vault")
 			token, err := initAndUnsealVault(ctx, clientset)
