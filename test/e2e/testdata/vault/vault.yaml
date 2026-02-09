@@ -59,7 +59,12 @@ spec:
           command: ["vault"]
           args:
             - server
-            - -config=/vault/config/vault.hcl          
+            - -config=/vault/config/vault.hcl    
+          env:
+            - name: VAULT_API_ADDR
+              value: http://127.0.0.1:8200
+            - name: VAULT_ADDR
+              value: http://127.0.0.1:8200      
           ports:
             - containerPort: 8200          
           securityContext:            
