@@ -96,7 +96,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		Expect(err).Should(BeNil())
 
 		awsSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
-		
+
 		vaultSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
 
 		namespace := &corev1.Namespace{
@@ -252,7 +252,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		)
 
 		BeforeAll(func() {
-			By("Deploying Vault (creates namespace)")
+			By("Deploying Vault using testdata/vault/vault.yaml")
 			Expect(applyVault(ctx, loader)).To(Succeed())
 
 			By("Applying NetworkPolicy for Vault namespace")
@@ -262,8 +262,10 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				"",
 			)
 
-			By("Waiting for Vault pod")
-			Expect(waitForVaultPod(ctx, clientset)).To(Succeed())
+			By("Waiting for Vault pod to be ready")
+			Eventually(func() error {
+				return waitForVaultPod(ctx, clientset)
+			}, 2*time.Minute, 5*time.Second).Should(Succeed))
 
 			By("Initializing and unsealing Vault")
 			token, err := initAndUnsealVault(ctx, clientset)
@@ -276,6 +278,9 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			By("Creating Vault ESO role")
 			Expect(createVaultRole(ctx, token)).To(Succeed())
 
+			By("Create a vault test secret")
+			Expect(createVaultTestSecret(ctx, clientset, token, vaultSecretName, base64.StdEncoding.EncodeToString(expectedSecretValue),
+			)).To(Succeed())
 		})
 
 		AfterAll(func() {
@@ -396,10 +401,22 @@ func waitForVaultPod(ctx context.Context, client *kubernetes.Clientset) error {
 
 // initialize and unseal vault
 func initAndUnsealVault(ctx context.Context, client *kubernetes.Clientset) (string, error) {
+	pod, err := getVaultPodName(ctx, client)
+	if err != nil {
+		return "", err
+	}
+
 	cmd := exec.Command(
 		"oc", "exec", "-n", vaultNamespace, "vault-0", "--", "sh", "-c",
 		`
 set -e
+
+if  vault status | grep -q "Initialized.*true"; then
+  echo "Vault already initialized"
+  vault token lookup >/dev/null || exit 1
+  exit 0
+fi
+
 vault operator init -key-shares=1 -key-threshold=1 > /tmp/init.out &&
 UNSEAL_KEY=$(grep 'Unseal Key 1:' /tmp/init.out | awk '{print $NF}') &&
 ROOT_TOKEN=$(grep 'Initial Root token:' /tmp/init.out | awk '{print $NF}') &&
@@ -413,6 +430,21 @@ echo $ROOT_TOKEN
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func getVaultPodName(ctx context.Context, client *kubernetes.Clientset) (string, error) {
+	pods, err := client.CoreV1().
+		Pods(vaultNamespace).
+		List(ctx, metav1.ListOptions{
+			LabelSelector: "app=vault",
+		})
+	if err != nil {
+		return "", err
+	}
+	if len(pods.Items) == 0 {
+		return "", fmt.Errorf("no vault pod found")
+	}
+	return pods.Items[0].Name, nil
 }
 
 // Enable kubernetes auth in vault
@@ -457,6 +489,21 @@ vault write auth/kubernetes/role/eso-role \
   policies=default \
   ttl=1h
 `, token),
+	)
+
+	_, err := utils.Run(cmd)
+	return err
+}
+
+func createVaultTestSecret(ctx context.Context, client *kubernetes.Clientset, token string, key, value string) error {
+	pod, _ := getVaultPodName(ctx, client)
+
+	cmd := exec.Command(
+		"oc", "exec", "-n", vaultNamespace, pod, "--", "sh", "-c",
+		fmt.Sprintf(`
+	export VAULT_TOKEN=%s
+	vault kv put secret/%s %s=%s
+	`, token, key, key, value),
 	)
 
 	_, err := utils.Run(cmd)
