@@ -406,7 +406,7 @@ func initAndUnsealVault(ctx context.Context, client *kubernetes.Clientset) (stri
 	}
 
 	cmd := exec.Command(
-		"oc", "exec", "-n", vaultNamespace, "vault-0", "--", "sh", "-c",
+		"oc", "exec", "-n", vaultNamespace, pod, "--", "sh", "-c",
 		`
 set -e
 
