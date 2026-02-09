@@ -265,7 +265,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			By("Waiting for Vault pod to be ready")
 			Eventually(func() error {
 				return waitForVaultPod(ctx, clientset)
-			}, 2*time.Minute, 5*time.Second).Should(Succeed))
+			}, 2*time.Minute, 5*time.Second).Should(Succeed())
 
 			By("Initializing and unsealing Vault")
 			token, err := initAndUnsealVault(ctx, clientset)
@@ -279,8 +279,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			Expect(createVaultRole(ctx, token)).To(Succeed())
 
 			By("Create a vault test secret")
-			Expect(createVaultTestSecret(ctx, clientset, token, vaultSecretName, base64.StdEncoding.EncodeToString(expectedSecretValue),
-			)).To(Succeed())
+			Expect(createVaultTestSecret(ctx, clientset, token, vaultSecretName, base64.StdEncoding.EncodeToString(expectedSecretValue))).To(Succeed())
 		})
 
 		AfterAll(func() {
