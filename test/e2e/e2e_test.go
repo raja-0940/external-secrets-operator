@@ -77,12 +77,13 @@ const (
 var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered, func() {
 	ctx := context.TODO()
 	var (
-		clientset       *kubernetes.Clientset
-		dynamicClient   *dynamic.DynamicClient
-		loader          utils.DynamicResourceLoader
-		awsSecretName   string
-		testNamespace   string
-		vaultSecretName string
+		clientset           *kubernetes.Clientset
+		dynamicClient       *dynamic.DynamicClient
+		loader              utils.DynamicResourceLoader
+		awsSecretName       string
+		testNamespace       string
+		vaultSecretName     string
+		expectedSecretValue []byte
 	)
 
 	BeforeAll(func() {
