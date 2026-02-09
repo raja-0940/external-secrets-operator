@@ -391,7 +391,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 // Apply vault manifest
 func applyVault(ctx context.Context, loader utils.DynamicResourceLoader) error {
-	loader.CreateFromFile(testassets.ReadFile, vaultManifestFile, "")
+	loader.CreateFromFile(testassets.ReadFile, vaultManifestFile, vaultNamespace)
 	return nil
 }
 
