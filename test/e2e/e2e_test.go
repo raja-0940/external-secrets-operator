@@ -34,6 +34,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -259,7 +260,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			By("DEBUG: Listening pods in vault-test namespace")
 			cmd := exec.Command("oc", "get", "all", "-n", vaultNamespace)
 			out, _ := cmd.CombinedOutput()
-			fmt.Fprintln(Ginkgowriter, string(out))
+			fmt.Fprintln(ginkgo.GinkgoWriter, string(out))
 
 			By("Waiting for vault-test namespace to exist")
 			Eventually(func() error {
