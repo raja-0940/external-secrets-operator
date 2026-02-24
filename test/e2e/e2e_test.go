@@ -254,6 +254,8 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			vaultSecretValue              = "test-value"
 		)
 
+		_ = expectedSecretValue
+
 		BeforeAll(func() {
 			By("Deploying Vault using testdata/vault/vault.yaml")
 			Expect(applyVault(ctx, loader)).To(Succeed())
