@@ -77,13 +77,13 @@ const (
 var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered, func() {
 	ctx := context.TODO()
 	var (
-		clientset       *kubernetes.Clientset
-		dynamicClient   *dynamic.DynamicClient
-		loader          utils.DynamicResourceLoader
-		awsSecretName   string
-		testNamespace   string
-		vaultSecretName string
-		// expectedSecretValue []byte
+		clientset     *kubernetes.Clientset
+		dynamicClient *dynamic.DynamicClient
+		loader        utils.DynamicResourceLoader
+		awsSecretName string
+		testNamespace string
+		// vaultSecretName string
+		expectedSecretValue []byte
 	)
 
 	BeforeAll(func() {
@@ -98,7 +98,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 		awsSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
 
-		vaultSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
+		// vaultSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
 
 		namespace := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
@@ -250,6 +250,8 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			secretValuePattern            = "${SECRET_VALUE}"
 			clusterSecretStoreNamePattern = "${CLUSTERSECRETSTORE_NAME}"
 			secretRegionName              = ""
+			vaultSecretName               = "test-key"
+			vaultSecretValue              = "test-value"
 		)
 
 		BeforeAll(func() {
@@ -284,14 +286,12 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			Expect(createVaultRole(ctx, clientset, token)).To(Succeed())
 
 			By("Create a vault test secret")
-			vaultexpectedSecretValue := []byte("eso-e2e-sample-value")
-			fmt.Println("Expected secret vaule is: ", vaultexpectedSecretValue)
 			Expect(createVaultTestSecret(
 				ctx,
 				clientset,
 				token,
 				vaultSecretName,
-				base64.StdEncoding.EncodeToString(vaultexpectedSecretValue),
+				vaultSecretValue,
 			)).To(Succeed())
 		})
 
