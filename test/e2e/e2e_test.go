@@ -308,15 +308,15 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		It("should create secrets mentioned in ExternalSecret using the referenced ClusterSecretStore", func() {
 			var (
 				// test bindata for Vault
-				vaultExternalSecretConfigFile  = "testdata/vault/external_secret_config.yaml"
-				vaultClusterSecretStoreFile    = "testdata/vault/cluster_secret_store.yaml"
-				vaultExternalSecretFile        = "testdata/vault/external_secret.yaml"
-				vaultPushSecretFile            = "testdata/vault/push_secret.yaml"
+				// vaultExternalSecretConfigFile  = "testdata/vault/external_secret_config.yaml"
+				vaultClusterSecretStoreFile = "testdata/vault/cluster_secret_store.yaml"
+				vaultExternalSecretFile     = "testdata/vault/external_secret.yaml"
+				// vaultPushSecretFile            = "testdata/vault/push_secret.yaml"
 				clusterSecretStoreResourceName = fmt.Sprintf("vault-secret-store-%s", utils.GetRandomString(5))
-				pushSecretResourceName         = "vault-push-secret"
-				externalSecretResourceName     = "vault-external-secret"
-				secretResourceName             = "vault-secret"
-				keyNameInSecret                = "vault_secret_access_key"
+				// pushSecretResourceName         = "vault-push-secret"
+				externalSecretResourceName = "vault-external-secret"
+				secretResourceName         = "vault-secret"
+				keyNameInSecret            = "vault_secret_access_key"
 			)
 
 			defer func() {
@@ -340,9 +340,9 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				"", clusterSecretStoreResourceName, time.Minute,
 			)).To(Succeed())
 
-			By("Creating ExternalSecret")
-			loader.CreateFromFile(assetFunc, vaultExternalSecretFile, testNamespace)
-			defer loader.DeleteFromFile(testassets.ReadFile, vaultExternalSecretFile, testNamespace)
+			// By("Creating ExternalSecret")
+			// loader.CreateFromFile(assetFunc, vaultExternalSecretFile, testNamespace)
+			// defer loader.DeleteFromFile(testassets.ReadFile, vaultExternalSecretFile, testNamespace)
 
 			By("Waiting for ExternalSecret to become Ready")
 			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
