@@ -325,25 +325,12 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 					NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")
 			}()
 
-			expectedSecretValue, err := utils.ReadExpectedSecretValue(expectedSecretValueFile)
-			Expect(err).To(Succeed())
-
-			By("Creating kubernetes secret to be used in PushSecret")
-			secretsAssetFunc := utils.ReplacePatternInAsset(secretValuePattern, base64.StdEncoding.EncodeToString(expectedSecretValue))
-			loader.CreateFromFile(secretsAssetFunc, vaultPushSecretFile, testNamespace)
-			defer loader.DeleteFromFile(testassets.ReadFile, vaultPushSecretFile, testNamespace)
-
-			// create external secret config using vaultExternalSecretConfigFile
-			_ = vaultExternalSecretConfigFile
-
-			// create external secret config using vaultExternalSecretConfigFile
-
-			By("Creating ClusterSecretStore")
+			By("Creating SecretStore")
 			cssAssetFunc := utils.ReplacePatternInAsset(clusterSecretStoreNamePattern, clusterSecretStoreResourceName)
 			loader.CreateFromFile(cssAssetFunc, vaultClusterSecretStoreFile, testNamespace)
 			defer loader.DeleteFromFile(cssAssetFunc, vaultClusterSecretStoreFile, testNamespace)
 
-			By("Waiting for ClusterSecretStore to become Ready")
+			By("Waiting for SecretStore to become Ready")
 			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
 				schema.GroupVersionResource{
 					Group:    externalSecretsGroupName,
@@ -351,22 +338,6 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 					Resource: clusterSecretStoresKind,
 				},
 				"", clusterSecretStoreResourceName, time.Minute,
-			)).To(Succeed())
-
-			By("Creating PushSecret")
-			assetFunc := utils.ReplacePatternInAsset(secretNamePattern, vaultSecretName,
-				clusterSecretStoreNamePattern, clusterSecretStoreResourceName)
-			loader.CreateFromFile(assetFunc, vaultPushSecretFile, testNamespace)
-			defer loader.DeleteFromFile(testassets.ReadFile, vaultPushSecretFile, testNamespace)
-
-			By("Waiting for PushSecret to become Ready")
-			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
-				schema.GroupVersionResource{
-					Group:    externalSecretsGroupName,
-					Version:  v1alpha1APIVersion,
-					Resource: PushSecretsKind,
-				},
-				testNamespace, pushSecretResourceName, time.Minute,
 			)).To(Succeed())
 
 			By("Creating ExternalSecret")
@@ -545,9 +516,13 @@ func createVaultPolicy(ctx context.Context, client *kubernetes.Clientset, token 
 		return err
 	}
 	policy := `
-path "secret/*" {
-  capabilities = ["create", "update", "read", "delete", "list"]
+path "secret/data/*" {
+  capabilities = ["read"]
 }
+
+path "secret/metadata/*" {
+   capabilities = ["read"]
+ }
 `
 	cmd := exec.Command(
 		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
@@ -580,7 +555,7 @@ vault write auth/kubernetes/role/eso-role \
   bound_service_account_names=external-secrets-operator-controller-manager \
   bound_service_account_namespaces=external-secrets-operator \
   policies=eso-policy \
-  ttl=1h
+  ttl=24h
 `, token),
 	)
 
