@@ -549,8 +549,8 @@ func createVaultRole(ctx context.Context, client *kubernetes.Clientset, token st
 		fmt.Sprintf(`
 export VAULT_TOKEN=%s
 vault write auth/kubernetes/role/eso-role \
-  bound_service_account_names=external-secrets-operator-controller-manager \
-  bound_service_account_namespaces=external-secrets-operator \
+  bound_service_account_names=external-secrets \
+  bound_service_account_namespaces=external-secrets \
   policies=eso-policy \
   ttl=24h
 `, token),
