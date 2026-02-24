@@ -310,7 +310,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				// test bindata for Vault
 				// vaultExternalSecretConfigFile  = "testdata/vault/external_secret_config.yaml"
 				vaultClusterSecretStoreFile = "testdata/vault/cluster_secret_store.yaml"
-				vaultExternalSecretFile     = "testdata/vault/external_secret.yaml"
+				// vaultExternalSecretFile     = "testdata/vault/external_secret.yaml"
 				// vaultPushSecretFile            = "testdata/vault/push_secret.yaml"
 				clusterSecretStoreResourceName = fmt.Sprintf("vault-secret-store-%s", utils.GetRandomString(5))
 				// pushSecretResourceName         = "vault-push-secret"
