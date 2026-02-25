@@ -309,12 +309,12 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		It("should create secret mentioned in ExternalSecret using the referenced SecretStore", func() {
 			var (
 				// test bindata for Vault
-				vaultClusterSecretStoreFile = "testdata/vault/cluster_secret_store.yaml"
-				vaultExternalSecretFile     = "testdata/vault/external_secret.yaml"
-				secretStoreResourceName     = "vault-store"
-				externalSecretResourceName  = "vault-e2e-test"
-				secretResourceName          = "vault-secret"
-				keyNameInSecret             = "vault_secret_access_key"
+				vaultSecretStoreFile       = "testdata/vault/cluster_secret_store.yaml"
+				vaultExternalSecretFile    = "testdata/vault/external_secret.yaml"
+				secretStoreResourceName    = "vault-store"
+				externalSecretResourceName = "vault-e2e-test"
+				secretResourceName         = "vault-secret"
+				keyNameInSecret            = "vault_secret_access_key"
 			)
 
 			defer func() {
@@ -324,12 +324,13 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			}()
 
 			By("Creating SecretStore")
-			Expect(loader.CreateFromFile(
-				secretStoreResourceName,
-				vaultClusterSecretStoreFile,
-				vaultNamespace)).To(Succeed())
+			cmd := exec.Command(
+				"oc", "apply", "-f", vaultSecretStoreFile, "-n", vaultNamespace,
+			)
+			output, err := cmd.CombinedOutput()
+			Expect(err).ToNot(HaveOccurred(), string(output))
 
-			defer loader.DeleteFromFile(secretStoreResourceName, vaultClusterSecretStoreFile, vaultNamespace)
+			// defer loader.DeleteFromFile(secretStoreResourceName, vaultSecretStoreFile, vaultNamespace)
 
 			By("Waiting for SecretStore to become Ready")
 			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
@@ -342,8 +343,13 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			)).To(Succeed())
 
 			By("Creating ExternalSecret")
-			loader.CreateFromFile(externalSecretResourceName, vaultExternalSecretFile, vaultNamespace)
-			defer loader.DeleteFromFile(externalSecretResourceName, vaultExternalSecretFile, vaultNamespace)
+			cmd := exec.Command(
+				"oc", "apply", "-f", vaultExternalSecretFile, "-n", vaultNamespace,
+			)
+			output, err := cmd.CombinedOutput()
+			Expect(err).ToNot(HaveOccurred(), string(output))
+
+			// defer loader.DeleteFromFile(externalSecretResourceName, vaultExternalSecretFile, vaultNamespace)
 
 			By("Waiting for ExternalSecret to become Ready")
 			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
