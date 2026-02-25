@@ -324,7 +324,11 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			}()
 
 			By("Creating SecretStore")
-			loader.CreateFromFile(secretStoreResourceName, vaultClusterSecretStoreFile, vaultNamespace)
+			Expect(loader.CreateFromFile(
+				secretStoreResourceName,
+				vaultClusterSecretStoreFile,
+				vaultNamespace)).To(Succeed())
+
 			defer loader.DeleteFromFile(secretStoreResourceName, vaultClusterSecretStoreFile, vaultNamespace)
 
 			By("Waiting for SecretStore to become Ready")
