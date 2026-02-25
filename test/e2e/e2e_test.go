@@ -343,10 +343,10 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			)).To(Succeed())
 
 			By("Creating ExternalSecret")
-			cmd := exec.Command(
+			cmd = exec.Command(
 				"oc", "apply", "-f", vaultExternalSecretFile, "-n", vaultNamespace,
 			)
-			output, err := cmd.CombinedOutput()
+			output, err = cmd.CombinedOutput()
 			Expect(err).ToNot(HaveOccurred(), string(output))
 
 			// defer loader.DeleteFromFile(externalSecretResourceName, vaultExternalSecretFile, vaultNamespace)
