@@ -319,26 +319,20 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				externalsecretsConfigFile,
 				"",
 			)
-			// cmd := exec.Command("oc", "apply", "-f", externalsecretsConfigFile)
-			// out, err := cmd.CombinedOutput()
-			// Expect(err).ToNot(HaveOccurred(), string(out))
 
 			By("Applying Vault NetworkPolicy")
 			loader.CreateFromFile(
 				testassets.ReadFile,
-				externalsecretsConfigFile,
+				vaultNetworkPolicyFile,
 				"",
 			)
-			// cmd = exec.Command("oc", "apply", "-f", vaultNetworkPolicyFile)
-			// out, err = cmd.CombinedOutput()
-			// Expect(err).ToNot(HaveOccurred(), string(out))
 
 			By("Creating SecretStore")
-			cmd := exec.Command(
-				"oc", "apply", "-f", vaultSecretStoreFile, "-n", vaultNamespace,
+			loader.CreateFromFile(
+				testassets.ReadFile,
+				vaultSecretStoreFile,
+				"",
 			)
-			out, err := cmd.CombinedOutput()
-			Expect(err).ToNot(HaveOccurred(), string(out))
 
 			By("Waiting for SecretStore to become Ready")
 			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
@@ -351,11 +345,11 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			)).To(Succeed())
 
 			By("Creating ExternalSecret")
-			cmd = exec.Command(
-				"oc", "apply", "-f", vaultExternalSecretFile, "-n", vaultNamespace,
+			loader.CreateFromFile(
+				testassets.ReadFile,
+				vaultExternalSecretFile,
+				"",
 			)
-			out, err = cmd.CombinedOutput()
-			Expect(err).ToNot(HaveOccurred(), string(out))
 
 			By("Waiting for ExternalSecret to become Ready")
 			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
