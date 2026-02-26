@@ -324,11 +324,11 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			Expect(err).ToNot(HaveOccurred(), string(out))
 
 			By("Creating SecretStore")
-			cmd := exec.Command(
+			cmd = exec.Command(
 				"oc", "apply", "-f", vaultSecretStoreFile, "-n", vaultNamespace,
 			)
-			output, err := cmd.CombinedOutput()
-			Expect(err).ToNot(HaveOccurred(), string(output))
+			out, err = cmd.CombinedOutput()
+			Expect(err).ToNot(HaveOccurred(), string(out))
 
 			By("Waiting for SecretStore to become Ready")
 			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
