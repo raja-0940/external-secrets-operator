@@ -1,36 +1,26 @@
-apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
 metadata:
-  name: allow-kube-essential
-  namespace: vault-test
+  name: allow-to-vault-test
+  namespace: external-secrets
 spec:
-  podSelector: {}    
-  policyTypes:
-  - Ingress
-  - Egress
-  
-  ingress:
-  - from:
-    - podSelector: {}
-    - namespaceSelector: {}
-    
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - external-secrets
+          - bitwarden-sdk-server
   egress:
-  - to:
-    - ipBlock:
-        cidr: 0.0.0.0/0
-    ports:
-    - protocol: TCP
-      port: 443
-      
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: openshift-dns
-    ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53
-      
-  - to:
-    - podSelector: {}
+    - ports:
+        - protocol: TCP
+          port: 8200
+      to:
+        - podSelector:
+            matchLabels:
+              app: vault
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vault-test
+  policyTypes:
+    - Egress
