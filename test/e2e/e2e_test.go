@@ -78,11 +78,11 @@ const (
 var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered, func() {
 	ctx := context.TODO()
 	var (
-		clientset     *kubernetes.Clientset
-		dynamicClient *dynamic.DynamicClient
-		loader        utils.DynamicResourceLoader
-		awsSecretName string
-		testNamespace string
+		clientset           *kubernetes.Clientset
+		dynamicClient       *dynamic.DynamicClient
+		loader              utils.DynamicResourceLoader
+		awsSecretName       string
+		testNamespace       string
 		expectedSecretValue []byte
 	)
 
@@ -98,7 +98,6 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 		awsSecretName = fmt.Sprintf("eso-e2e-secret-%s", utils.GetRandomString(5))
 
-		
 		namespace := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -241,11 +240,11 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 	// TODO: Update vault.yaml
 	Context("Vault Secret Manager", Label("Platform:Vault"), func() {
 		const (
-			clusterSecretStoreFile        = "testdata/vault/secret_store.yaml"
-			externalSecretFile            = "testdata/vault/external_secret.yaml"			
-			vaultSecretName               = "foo"
-			vaultSecretKey                = "my-value"
-			vaultSecretValue              = "bar"
+			clusterSecretStoreFile = "testdata/vault/secret_store.yaml"
+			externalSecretFile     = "testdata/vault/external_secret.yaml"
+			vaultSecretName        = "foo"
+			vaultSecretKey         = "my-value"
+			vaultSecretValue       = "bar"
 		)
 
 		_ = expectedSecretValue
@@ -255,7 +254,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			Expect(applyVault(ctx, loader)).To(Succeed())
 
 			By("Waiting for Vault pod")
-			Expect(waitForVaultPod(ctx, clientset)).To(Succeed())			
+			Expect(waitForVaultPod(ctx, clientset)).To(Succeed())
 
 			By("Initializing and unsealing Vault")
 			token, err := initAndUnsealVault(ctx, clientset)
@@ -308,7 +307,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				secretStoreResourceName    = "vault-backend"
 				externalSecretResourceName = "vault-example"
 				targetSecretName           = "k8s-secret-to-create" //must match with external_secret.yaml target.name
-				targetSecretKey            = "password" //must match with external_secret.yaml data.secretKey
+				targetSecretKey            = "password"             //must match with external_secret.yaml data.secretKey
 			)
 
 			// defer func() {
@@ -374,9 +373,9 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 					targetSecretKey, targetSecretName)
 
 				g.Expect(string(value)).To(Equal(vaultSecretValue),
-				"Secret value mismatch")
+					"Secret value mismatch")
 
-				}, time.Minute, 5*time.Second).Should(Succeed())
+			}, time.Minute, 5*time.Second).Should(Succeed())
 		})
 	})
 })
@@ -535,12 +534,12 @@ func createVaultTestSecret(ctx context.Context, client *kubernetes.Clientset, to
 func createVaultTokenSecret(ctx context.Context, client *kubernetes.Clientset, token string) error {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       "vault-token",
-			Namespace:  vaultNamespace
+			Name:      "vault-token",
+			Namespace: vaultNamespace,
 		},
 		StringData: map[string]string{
 			"token": token,
-		},		
+		},
 	}
 
 	_, err := client.CoreV1().Secrets(vaultNamespace).Create(ctx, secret, metav1.CreateOptions{})
