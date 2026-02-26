@@ -481,36 +481,6 @@ func enableKVEngine(ctx context.Context, client *kubernetes.Clientset, token str
 	return err
 }
 
-// Create Vault policy
-func createVaultPolicy(ctx context.Context, client *kubernetes.Clientset, token string) error {
-	podName, err := getVaultPodName(ctx, client)
-	if err != nil {
-		return err
-	}
-	policy := `
-path "secret/data/*" {
-  capabilities = ["read"]
-}
-
-path "secret/metadata/*" {
-   capabilities = ["read"]
- }
-`
-	cmd := exec.Command(
-		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
-		fmt.Sprintf(`
-cat <<EOF > /tmp/eso-policy.hcl
-%s
-EOF
-vault policy write eso-policy /tmp/eso-policy.hcl
-`, token, policy),
-	)
-
-	out, err := utils.Run(cmd)
-	fmt.Println(string(out))
-	return err
-}
-
 // Create a vault test secret
 func createVaultTestSecret(ctx context.Context, client *kubernetes.Clientset, token string, secretname string, key, value string) error {
 	podName, err := getVaultPodName(ctx, client)
