@@ -483,7 +483,7 @@ func configureVaultK8sAuth(ctx context.Context, client *kubernetes.Clientset, to
 	out, err := utils.Run(cmd)
 	fmt.Println(string(out))
 	if err != nil {
-		return "", err
+		return err
 	}
 }
 
@@ -509,7 +509,7 @@ vault write auth/kubernetes/config \
 	out, err := utils.Run(cmd)
 	fmt.Println(string(out))
 	if err != nil {
-		return "", err
+		return err
 	}
 }
 
@@ -531,7 +531,7 @@ func enableKVEngine(ctx context.Context, client *kubernetes.Clientset, token str
 	out, err := utils.Run(cmd)
 	fmt.Println(string(out))
 	if err != nil {
-		return "", err
+		return err
 	}
 }
 
@@ -566,7 +566,7 @@ vault policy write eso-policy /tmp/eso-policy.hcl
 	out, err := utils.Run(cmd)
 	fmt.Println(string(out))
 	if err != nil {
-		return "", err
+		return err
 	}
 }
 
@@ -594,7 +594,7 @@ vault write auth/kubernetes/role/eso-role \
 	out, err := utils.Run(cmd)
 	fmt.Println(string(out))
 	if err != nil {
-		return "", err
+		return err
 	}
 }
 
@@ -615,6 +615,6 @@ func createVaultTestSecret(ctx context.Context, client *kubernetes.Clientset, to
 	out, err := utils.Run(cmd)
 	fmt.Println(string(out))
 	if err != nil {
-		return "", err
+		return err
 	}
 }
