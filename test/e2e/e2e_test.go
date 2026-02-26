@@ -278,25 +278,25 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 		})
 
-		AfterEach(func() {
-			By("Cleaning up ExternalSecret")
-			safeDelete(exec.Command("oc", "delete", "externalsecret", "vault-e2e-test", "-n", vaultNamespace, "--ignore-not-found"))
+		// AfterEach(func() {
+		// 	By("Cleaning up ExternalSecret")
+		// 	safeDelete(exec.Command("oc", "delete", "externalsecret", "vault-e2e-test", "-n", vaultNamespace, "--ignore-not-found"))
 
-			By("Cleaning up SecretStore")
-			safeDelete(exec.Command("oc", "delete", "secretstore", "vault-store", "-n", vaultNamespace, "--ignore-not-found"))
+		// 	By("Cleaning up SecretStore")
+		// 	safeDelete(exec.Command("oc", "delete", "secretstore", "vault-store", "-n", vaultNamespace, "--ignore-not-found"))
 
-			By("Cleaning up generated Secret")
-			safeDelete(exec.Command("oc", "delete", "secret", "vault-secret", "-n", vaultNamespace, "--ignore-not-found"))
+		// 	By("Cleaning up generated Secret")
+		// 	safeDelete(exec.Command("oc", "delete", "secret", "vault-secret", "-n", vaultNamespace, "--ignore-not-found"))
 
-			By("Cleaning up vault-token secret")
-			safeDelete(exec.Command("oc", "delete", "secret", "vault-token", "-n", vaultNamespace, "--ignore-not-found"))
+		// 	By("Cleaning up vault-token secret")
+		// 	safeDelete(exec.Command("oc", "delete", "secret", "vault-token", "-n", vaultNamespace, "--ignore-not-found"))
 
-			By("Cleaning up NetworkPolicy")
-			safeDelete(exec.Command("oc", "delete", "-f", vaultNetworkPolicyFile, "--ignore-not-found"))
+		// 	By("Cleaning up NetworkPolicy")
+		// 	safeDelete(exec.Command("oc", "delete", "-f", vaultNetworkPolicyFile, "--ignore-not-found"))
 
-			By("Cleaning up ExternalSecretsConfig")
-			safeDelete(exec.Command("oc", "delete", "-f", "testdata/vault/externalsecretsconfig.yaml", "--ignore-not-found"))
-		})
+		// 	By("Cleaning up ExternalSecretsConfig")
+		// 	safeDelete(exec.Command("oc", "delete", "-f", "testdata/vault/externalsecretsconfig.yaml", "--ignore-not-found"))
+		// })
 
 		It("should create secret mentioned in ExternalSecret using the referenced SecretStore", func() {
 			var (
@@ -314,14 +314,24 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			// }()
 
 			By("Applying ExternalSecretsConfig")
-			cmd := exec.Command("oc", "apply", "-f", externalsecretsConfigFile)
-			out, err := cmd.CombinedOutput()
-			Expect(err).ToNot(HaveOccurred(), string(out))
+			loader.CreateFromFile(
+				testassets.ReadFile,
+				externalsecretsConfigFile,
+				"",
+			)
+			// cmd := exec.Command("oc", "apply", "-f", externalsecretsConfigFile)
+			// out, err := cmd.CombinedOutput()
+			// Expect(err).ToNot(HaveOccurred(), string(out))
 
 			By("Applying Vault NetworkPolicy")
-			cmd = exec.Command("oc", "apply", "-f", vaultNetworkPolicyFile)
-			out, err = cmd.CombinedOutput()
-			Expect(err).ToNot(HaveOccurred(), string(out))
+			loader.CreateFromFile(
+				testassets.ReadFile,
+				externalsecretsConfigFile,
+				"",
+			)
+			// cmd = exec.Command("oc", "apply", "-f", vaultNetworkPolicyFile)
+			// out, err = cmd.CombinedOutput()
+			// Expect(err).ToNot(HaveOccurred(), string(out))
 
 			By("Creating SecretStore")
 			cmd = exec.Command(
