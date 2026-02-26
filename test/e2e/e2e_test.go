@@ -275,12 +275,12 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			token, err := initAndUnsealVault(ctx, clientset)
 			Expect(err).ToNot(HaveOccurred())
 
-			By("Configuring Vault Kubernetes auth")
-			Expect(configureVaultK8sAuth(ctx, clientset, token)).To(Succeed())
-			Expect(configureVaultK8sConfig(ctx, clientset, token)).To(Succeed())
-
 			By("Enable KVEngine")
 			Expect(enableKVEngine(ctx, clientset, token)).To(Succeed())
+
+			By("Configuring Vault Kubernetes auth")
+			Expect(configureVaultK8sAuth(ctx, clientset, token)).To(Succeed())
+			Expect(configureVaultK8sConfig(ctx, clientset, token)).To(Succeed())			
 
 			By("Creating Vault policy")
 			Expect(createVaultPolicy(ctx, clientset, token)).To(Succeed())
@@ -322,6 +322,12 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				Expect(utils.DeleteVaultSecret(ctx, clientset, vaultNamespace, vaultSecretName)).
 					NotTo(HaveOccurred(), "failed to delete Vault secret test/e2e")
 			}()
+
+			// set up externalsecretsconfig
+
+			// Create the vault-token using the root access
+
+			// Create a networkpolicy
 
 			By("Creating SecretStore")
 			cmd := exec.Command(
@@ -406,7 +412,7 @@ func waitForVaultPod(ctx context.Context, client *kubernetes.Clientset) error {
 }
 
 // initAndUnsealVault initializes and unselas the Vault instance running in the test namespace, then returns the generated root token.
-// it executes the vault CLi commands inside the vault pod and extracts the unseal key and root token from the output,
+// it executes the vault CLI commands inside the vault pod and extracts the unseal key and root token from the output,
 // and prepares vault for further configuration in E2E tests.
 func initAndUnsealVault(ctx context.Context, client *kubernetes.Clientset) (string, error) {
 	podName, err := getVaultPodName(ctx, client)
@@ -421,17 +427,21 @@ vault operator init -key-shares=1 -key-threshold=1 > /tmp/init.out &&
 UNSEAL_KEY=$(grep 'Unseal Key 1:' /tmp/init.out | awk '{print $NF}') &&
 ROOT_TOKEN=$(grep 'Initial Root Token:' /tmp/init.out | awk '{print $NF}') &&
 vault operator unseal $UNSEAL_KEY &&
+vault status &&
+vault login $ROOT_TOKEN &&
 echo $ROOT_TOKEN
 		`,
 	)
 
 	out, err := utils.Run(cmd)
+	fmt.Println(string(out))
 	if err != nil {
 		return "", err
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	token := strings.TrimSpace(lines[len(lines)-1])
+	fmt.Println("Vault Token: ", token)
 	return token, nil
 }
 
@@ -465,13 +475,16 @@ func configureVaultK8sAuth(ctx context.Context, client *kubernetes.Clientset, to
 	cmd := exec.Command(
 		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
 		fmt.Sprintf(
-			"export VAULT_TOKEN=%s && vault auth enable kubernetes || true",
+			"vault status && vault login %s && vault auth enable kubernetes || true",
 			token,
 		),
 	)
 
-	_, err = utils.Run(cmd)
-	return err
+	out, err := utils.Run(cmd)
+	fmt.Println(string(out))
+	if err != nil {
+		return "", err
+	}
 }
 
 // configure kubernetes auth
@@ -485,15 +498,19 @@ func configureVaultK8sConfig(ctx context.Context, client *kubernetes.Clientset, 
 	cmd := exec.Command(
 		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
 		fmt.Sprintf(`
-export VAULT_TOKEN=%s
+vault status
+vault login %s
 vault write auth/kubernetes/config \
   kubernetes_host="https://kubernetes.default.svc" \
   issuer="https://kubernetes.default.svc"
 `, token),
 	)
 
-	_, err = utils.Run(cmd)
-	return err
+	out, err := utils.Run(cmd)
+	fmt.Println(string(out))
+	if err != nil {
+		return "", err
+	}
 }
 
 // Enable KV engine
@@ -505,14 +522,17 @@ func enableKVEngine(ctx context.Context, client *kubernetes.Clientset, token str
 
 	cmd := exec.Command(
 		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
-		fmt.Sprintf(`
-export VAULT_TOKEN=%s
-vault secrets enable -path=secret kv-v2 || true
-`, token),
+		fmt.Sprintf(
+			"vault status && vault login %s && vault secrets enable -path=secret kv-v2 || true",
+			token
+		),
 	)
 
-	_, err = utils.Run(cmd)
-	return err
+	out, err := utils.Run(cmd)
+	fmt.Println(string(out))
+	if err != nil {
+		return "", err
+	}
 }
 
 // Create Vault policy
@@ -534,7 +554,8 @@ path "secret/metadata/*" {
 	cmd := exec.Command(
 		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
 		fmt.Sprintf(`
-export VAULT_TOKEN=%s
+vault status
+vault login %s
 cat <<EOF > /tmp/eso-policy.hcl
 %s
 EOF
@@ -542,8 +563,11 @@ vault policy write eso-policy /tmp/eso-policy.hcl
 `, token, policy),
 	)
 
-	_, err = utils.Run(cmd)
-	return err
+	out, err := utils.Run(cmd)
+	fmt.Println(string(out))
+	if err != nil {
+		return "", err
+	}
 }
 
 // Create ESO vault role
@@ -557,7 +581,8 @@ func createVaultRole(ctx context.Context, client *kubernetes.Clientset, token st
 	cmd := exec.Command(
 		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
 		fmt.Sprintf(`
-export VAULT_TOKEN=%s
+vault status
+vault login %s
 vault write auth/kubernetes/role/eso-role \
   bound_service_account_names=external-secrets \
   bound_service_account_namespaces=external-secrets \
@@ -566,8 +591,11 @@ vault write auth/kubernetes/role/eso-role \
 `, token),
 	)
 
-	_, err = utils.Run(cmd)
-	return err
+	out, err := utils.Run(cmd)
+	fmt.Println(string(out))
+	if err != nil {
+		return "", err
+	}
 }
 
 func createVaultTestSecret(ctx context.Context, client *kubernetes.Clientset, token string, key, value string) error {
@@ -579,11 +607,14 @@ func createVaultTestSecret(ctx context.Context, client *kubernetes.Clientset, to
 	cmd := exec.Command(
 		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
 		fmt.Sprintf(
-			"export VAULT_TOKEN=%s && vault kv put secret/%s %s=\"%s\"",
+			"vault status && vault login %s && vault kv put secret/%s %s=\"%s\"",
 			token, key, key, value,
 		),
 	)
 
-	_, err = utils.Run(cmd)
-	return err
+	out, err := utils.Run(cmd)
+	fmt.Println(string(out))
+	if err != nil {
+		return "", err
+	}
 }
