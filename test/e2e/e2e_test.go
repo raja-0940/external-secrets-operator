@@ -280,7 +280,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 			By("Configuring Vault Kubernetes auth")
 			Expect(configureVaultK8sAuth(ctx, clientset, token)).To(Succeed())
-			Expect(configureVaultK8sConfig(ctx, clientset, token)).To(Succeed())			
+			Expect(configureVaultK8sConfig(ctx, clientset, token)).To(Succeed())
 
 			By("Creating Vault policy")
 			Expect(createVaultPolicy(ctx, clientset, token)).To(Succeed())
@@ -524,7 +524,7 @@ func enableKVEngine(ctx context.Context, client *kubernetes.Clientset, token str
 		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
 		fmt.Sprintf(
 			"vault status && vault login %s && vault secrets enable -path=secret kv-v2 || true",
-			token
+			token,
 		),
 	)
 
