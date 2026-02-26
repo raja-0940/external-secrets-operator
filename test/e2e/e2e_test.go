@@ -502,6 +502,18 @@ func createVaultTestSecret(ctx context.Context, client *kubernetes.Clientset, to
 }
 
 func createVaultTokenSecret(ctx context.Context, client *kubernetes.Clientset, token string) error {
+	secretsClient := client.CoreV1().Secrets(vaultNamespace)
+	existing, err := secretsClient.Get(ctx, "vault-token", metav1.GetOptions{})
+	if err == nil {
+		// Secret exists → update it
+		existing.StringData = map[string]string{
+			"token": token,
+		}
+		_, err = secretsClient.Update(ctx, existing, metav1.UpdateOptions{})
+		return err
+	}
+
+	// Secret does not exist → create
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vault-token",
@@ -510,9 +522,10 @@ func createVaultTokenSecret(ctx context.Context, client *kubernetes.Clientset, t
 		StringData: map[string]string{
 			"token": token,
 		},
+		Type: corev1.SecretTypeOpaque,
 	}
 
-	_, err := client.CoreV1().Secrets(vaultNamespace).Create(ctx, secret, metav1.CreateOptions{})
+	_, err = secretsClient.Create(ctx, secret, metav1.CreateOptions{})
 	return err
 }
 
