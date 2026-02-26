@@ -344,8 +344,8 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			cmd = exec.Command(
 				"oc", "apply", "-f", vaultExternalSecretFile, "-n", vaultNamespace,
 			)
-			output, err = cmd.CombinedOutput()
-			Expect(err).ToNot(HaveOccurred(), string(output))
+			out, err = cmd.CombinedOutput()
+			Expect(err).ToNot(HaveOccurred(), string(out))
 
 			By("Waiting for ExternalSecret to become Ready")
 			Expect(utils.WaitForESOResourceReady(ctx, dynamicClient,
