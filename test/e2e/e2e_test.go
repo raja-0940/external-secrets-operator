@@ -294,7 +294,8 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			By("Cleaning up NetworkPolicy")
 			safeDelete(exec.Command(
 				"oc", "delete",
-				"networkpolicy", "external-secrets",
+				"networkpolicy", "allow-to-vault-test",
+				"-n", "external-secrets",
 				"--ignore-not-found",
 			))
 
