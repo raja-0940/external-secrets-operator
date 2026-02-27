@@ -292,10 +292,18 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			safeDelete(exec.Command("oc", "delete", "secret", "vault-token", "-n", vaultNamespace, "--ignore-not-found"))
 
 			By("Cleaning up NetworkPolicy")
-			safeDelete(exec.Command("oc", "delete", "-f", vaultNetworkPolicyFile, "--ignore-not-found"))
+			safeDelete(exec.Command(
+				"oc", "delete",
+				"networkpolicy", "external-secrets",
+				"--ignore-not-found",
+			))
 
 			By("Cleaning up ExternalSecretsConfig")
-			safeDelete(exec.Command("oc", "delete", "-f", "testdata/vault/externalsecretsconfig.yaml", "--ignore-not-found"))
+			safeDelete(exec.Command(
+				"oc", "delete",
+				"ExternalSecretsConfig", "cluster",
+				"--ignore-not-found",
+			))
 		})
 
 		It("should create secret mentioned in ExternalSecret using the referenced SecretStore", func() {
@@ -367,14 +375,19 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 					Secrets(vaultNamespace).
 					Get(ctx, targetSecretName, metav1.GetOptions{})
 
-				g.Expect(err).NotTo(HaveOccurred(),
-					"Expected secret %s to exist in namespace %s",
-					targetSecretName, vaultNamespace)
+				g.Expect(err).NotTo(HaveOccurred())
 
 				value, exists := secret.Data[targetSecretKey]
-				g.Expect(exists).To(BeTrue(),
-					"Expected key %s in secret %s",
-					targetSecretKey, targetSecretName)
+				g.Expect(exists).To(BeTrue())
+
+				actual := string(value)
+
+				fmt.Printf("Expexted: %s | Actual: %s\n",
+					vaultSecretValue, actual)
+
+				g.Expect(actual).To(Equal(vaultSecretValue),
+					"Secret value mismatch. Expected=%s Actual=%s",
+					vaultSecretValue, actual)
 
 				g.Expect(string(value)).To(Equal(vaultSecretValue),
 					"Secret value mismatch")
