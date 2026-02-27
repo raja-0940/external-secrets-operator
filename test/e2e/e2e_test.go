@@ -280,13 +280,13 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 		AfterEach(func() {
 			By("Cleaning up ExternalSecret")
-			safeDelete(exec.Command("oc", "delete", "externalsecret", "vault-e2e-test", "-n", vaultNamespace, "--ignore-not-found"))
+			safeDelete(exec.Command("oc", "delete", "externalsecret", "vault-example", "-n", vaultNamespace, "--ignore-not-found"))
 
 			By("Cleaning up SecretStore")
-			safeDelete(exec.Command("oc", "delete", "secretstore", "vault-store", "-n", vaultNamespace, "--ignore-not-found"))
+			safeDelete(exec.Command("oc", "delete", "secretstore", "vault-backend", "-n", vaultNamespace, "--ignore-not-found"))
 
 			By("Cleaning up generated Secret")
-			safeDelete(exec.Command("oc", "delete", "secret", "vault-secret", "-n", vaultNamespace, "--ignore-not-found"))
+			safeDelete(exec.Command("oc", "delete", "secret", "k8s-secret-to-create", "-n", vaultNamespace, "--ignore-not-found"))
 
 			By("Cleaning up vault-token secret")
 			safeDelete(exec.Command("oc", "delete", "secret", "vault-token", "-n", vaultNamespace, "--ignore-not-found"))
