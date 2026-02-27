@@ -284,7 +284,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				"oc", "delete",
 				"namespace", vaultNamespace,
 				"--ignore-not-found",
-				"--wait=true"
+				"--wait=true",
 			))
 
 			By("Cleaning up NetworkPolicy")
