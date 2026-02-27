@@ -279,17 +279,13 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		})
 
 		AfterEach(func() {
-			By("Cleaning up ExternalSecret")
-			safeDelete(exec.Command("oc", "delete", "externalsecret", "vault-example", "-n", vaultNamespace, "--ignore-not-found"))
-
-			By("Cleaning up SecretStore")
-			safeDelete(exec.Command("oc", "delete", "secretstore", "vault-backend", "-n", vaultNamespace, "--ignore-not-found"))
-
-			By("Cleaning up generated Secret")
-			safeDelete(exec.Command("oc", "delete", "secret", "k8s-secret-to-create", "-n", vaultNamespace, "--ignore-not-found"))
-
-			By("Cleaning up vault-token secret")
-			safeDelete(exec.Command("oc", "delete", "secret", "vault-token", "-n", vaultNamespace, "--ignore-not-found"))
+			By("Cleaning up Vault namespace")
+			safeDelete(exec.Command(
+				"oc", "delete",
+				"namespace", vaultNamespace,
+				"--ignore-not-found",
+				"--wait=true"
+			))
 
 			By("Cleaning up NetworkPolicy")
 			safeDelete(exec.Command(
@@ -318,9 +314,6 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				targetSecretName           = "k8s-secret-to-create" //must match with external_secret.yaml target.name
 				targetSecretKey            = "password"             //must match with external_secret.yaml data.secretKey
 			)
-
-			// defer func() {
-			// }()
 
 			By("Applying ExternalSecretsConfig")
 			loader.CreateFromFile(
