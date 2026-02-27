@@ -376,7 +376,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 
 				actual := string(value)
 
-				fmt.Printf("Expexted: %s | Actual: %s\n",
+				fmt.Printf("Expected: %s | Actual: %s\n",
 					vaultSecretValue, actual)
 
 				g.Expect(actual).To(Equal(vaultSecretValue),
