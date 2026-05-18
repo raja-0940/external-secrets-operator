@@ -19,6 +19,7 @@ limitations under the License.
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/base64"
@@ -32,7 +33,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
+	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
@@ -70,6 +75,7 @@ const (
 	vaultServiceName               = "vault"
 	vaultAddr                      = "http://vault.vault-test.svc.cluster.local:8200"
 	targetSecretName               = "k8s-secret-to-create" //must match with external_secret.yaml target.name
+	vaultEgressNetworkPolicyName   = "allow-vault-egress"
 )
 
 const (
@@ -777,12 +783,15 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				targetSecretKey            = "password" //must match with external_secret.yaml data.secretKey
 			)
 
-			By("Applying ExternalSecretsConfig")
-			loader.CreateFromFile(
-				testassets.ReadFile,
-				externalsecretsConfigFile,
-				"",
-			)
+			By("Ensuring ExternalSecretsConfig has Vault egress network policy")
+			updated, err := ensureVaultEgressOnExternalSecretsConfig(ctx, runtimeClient, externalsecretsConfigFile)
+			Expect(err).NotTo(HaveOccurred())
+			if updated {
+				By("Waiting for ExternalSecretsConfig to reconcile with Vault egress policy")
+				Expect(utils.WaitForExternalSecretsConfigReady(ctx, dynamicClient, "cluster", 2*time.Minute)).To(Succeed())
+				// Give the operator time to update the NetworkPolicy
+				time.Sleep(10 * time.Second)
+			}
 
 			By("Creating SecretStore")
 			loader.CreateFromFile(
@@ -1056,4 +1065,71 @@ func safeDelete(ctx context.Context, args ...string) {
 	if err != nil {
 		By(fmt.Sprintf("Cleanup error: %s", string(out)))
 	}
+}
+
+// loadExternalSecretsConfigFromFile loads the ExternalSecretsConfig from a file
+func loadExternalSecretsConfigFromFile(assetFunc func(string) ([]byte, error), filename string) (*operatorv1alpha1.ExternalSecretsConfig, error) {
+	data, err := assetFunc(filename)
+	if err != nil {
+		return nil, err
+	}
+	decoder := yamlutil.NewYAMLOrJSONDecoder(bytes.NewReader(data), 1024)
+	var rawObj runtime.RawExtension
+	if err := decoder.Decode(&rawObj); err != nil {
+		return nil, err
+	}
+	obj, _, err := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme).Decode(rawObj.Raw, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	unstructuredMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		return nil, err
+	}
+	esc := &operatorv1alpha1.ExternalSecretsConfig{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredMap, esc); err != nil {
+		return nil, err
+	}
+	return esc, nil
+}
+
+// ensureVaultEgressOnExternalSecretsConfig ensures the cluster ExternalSecretsConfig has the Vault egress
+// network policies. If policies are missing or different, they are updated. Returns true if an update was made.
+func ensureVaultEgressOnExternalSecretsConfig(ctx context.Context, c client.Client, vaultConfigFile string) (bool, error) {
+	var updated bool
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		esc := &operatorv1alpha1.ExternalSecretsConfig{}
+		if err := c.Get(ctx, client.ObjectKey{Name: "cluster"}, esc); err != nil {
+			return err
+		}
+
+		// Load the Vault config to get the network policies
+		vaultESC, err := loadExternalSecretsConfigFromFile(testassets.ReadFile, vaultConfigFile)
+		if err != nil {
+			return err
+		}
+
+		// Check if Vault network policies already exist
+		hasVaultPolicies := false
+		for _, np := range esc.Spec.ControllerConfig.NetworkPolicies {
+			if np.Name == vaultEgressNetworkPolicyName {
+				hasVaultPolicies = true
+				break
+			}
+		}
+
+		if hasVaultPolicies {
+			return nil
+		}
+
+		// Append Vault network policies
+		esc.Spec.ControllerConfig.NetworkPolicies = append(esc.Spec.ControllerConfig.NetworkPolicies, vaultESC.Spec.ControllerConfig.NetworkPolicies...)
+
+		if err := c.Update(ctx, esc); err != nil {
+			return err
+		}
+		updated = true
+		return nil
+	})
+	return updated, err
 }
