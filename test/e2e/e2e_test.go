@@ -68,7 +68,6 @@ const (
 	vaultNamespace                 = "vault-test"
 	vaultManifestFile              = "testdata/vault/vault.yaml"
 	vaultServiceName               = "vault"
-	vaultNetworkPolicyFile         = "testdata/vault/vault-networkpolicy.yaml"
 	vaultAddr                      = "http://vault.vault-test.svc.cluster.local:8200"
 	targetSecretName               = "k8s-secret-to-create" //must match with external_secret.yaml target.name
 )
@@ -765,14 +764,6 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				"--ignore-not-found",
 				"--wait=true",
 			)
-
-			By("Cleaning up NetworkPolicy")
-			safeDelete(ctx,
-				"delete",
-				"networkpolicy", "allow-to-vault-test",
-				"-n", "external-secrets",
-				"--ignore-not-found",
-			)
 		})
 
 		It("should create secret mentioned in ExternalSecret using the referenced SecretStore", func() {
@@ -790,13 +781,6 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			loader.CreateFromFile(
 				testassets.ReadFile,
 				externalsecretsConfigFile,
-				"",
-			)
-
-			By("Applying Vault NetworkPolicy")
-			loader.CreateFromFile(
-				testassets.ReadFile,
-				vaultNetworkPolicyFile,
 				"",
 			)
 
