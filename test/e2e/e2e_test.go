@@ -747,6 +747,9 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			By("Enable KV Engine")
 			Expect(enableKVEngine(ctx, clientset, token)).To(Succeed())
 
+			By("Creating vault-token Secret")
+			Expect(createVaultTokenSecret(ctx, clientset, token)).To(Succeed())
+
 			By("Create test secret in vault")
 			Expect(createVaultTestSecret(
 				ctx,
@@ -756,10 +759,6 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				vaultSecretKey,
 				vaultSecretValue,
 			)).To(Succeed())
-
-			By("Creating vault-token Secret")
-			Expect(createVaultTokenSecret(ctx, clientset, token)).To(Succeed())
-
 		})
 
 		AfterAll(func() {
