@@ -40,6 +40,7 @@ import (
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -734,27 +735,33 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 		)
 
 		BeforeAll(func() {
+
+			var err error
+			config, err = utils.GetConfigForTest(GinkgoT())
+			Expect(err).NotTo(HaveOccurred())
+
 			By("Deploying Vault")
-			Expect(applyVault(ctx)).To(Succeed())
+			Expect(applyVault(ctx, dynamicClient)).To(Succeed())
 
 			By("Waiting for Vault pod")
 			Expect(waitForVaultPod(ctx, clientset)).To(Succeed())
 
 			By("Initializing and unsealing Vault")
-			token, err := setupVault(ctx, clientset)
+			rootToken, err := setupVault(ctx, clientset, config)
 			Expect(err).ToNot(HaveOccurred())
 
 			By("Enable KV Engine")
-			Expect(enableKVEngine(ctx, clientset, token)).To(Succeed())
+			Expect(enableKVEngine(ctx, clientset, config, rootToken)).To(Succeed())
 
 			By("Creating vault-token Secret")
-			Expect(createVaultTokenSecret(ctx, clientset, token)).To(Succeed())
+			Expect(createVaultTokenSecret(ctx, clientset, rootToken)).To(Succeed())
 
 			By("Create test secret in vault")
 			Expect(createVaultTestSecret(
 				ctx,
 				clientset,
-				token,
+				config,
+				rootToken,
 				vaultSecretName,
 				vaultSecretKey,
 				vaultSecretValue,
@@ -860,23 +867,16 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 	})
 })
 
-// Apply vault manifest
-func applyVault(ctx context.Context) error {
+// Apply vault manifest using dynamic client
+func applyVault(ctx context.Context, dynamicClient *dynamic.DynamicClient) error {
+	By(fmt.Sprintf("Applying vault manifest from: %s", vaultManifestFile))
 
-	cmd := exec.CommandContext(ctx,
-		"oc",
-		"apply",
-		"-f",
-		vaultManifestFile,
-	)
-
-	out, err := cmd.CombinedOutput()
-	By(fmt.Sprintf("oc apply output:\n%s", string(out)))
-
+	err := utils.ApplyManifestFromFile(ctx, dynamicClient, vaultManifestFile)
 	if err != nil {
-		return fmt.Errorf("Failed to apply vault manifest: %w", err)
+		return fmt.Errorf("failed to apply vault manifest: %w", err)
 	}
 
+	By("Vault manifest applied successfully")
 	return nil
 }
 
@@ -890,10 +890,10 @@ func waitForVaultPod(ctx context.Context, client *kubernetes.Clientset) error {
 	)
 }
 
-// setupVault function initializes and unselas the Vault instance running in the test namespace, then returns the generated root token.
-// it executes the vault CLI commands inside the vault pod and extracts the unseal key and root token from the output,
+// setupVault function initializes and unseals the Vault instance running in the test namespace, then returns the generated root token.
+// It uses client-go to execute vault CLI commands inside the vault pod and extracts the unseal key and root token from the output,
 // and prepares vault for further configuration in E2E tests.
-func setupVault(ctx context.Context, client *kubernetes.Clientset) (string, error) {
+func setupVault(ctx context.Context, client *kubernetes.Clientset, config *rest.Config) (string, error) {
 	podName, err := getVaultPodName(ctx, client)
 	if err != nil {
 		return "", err
@@ -902,21 +902,20 @@ func setupVault(ctx context.Context, client *kubernetes.Clientset) (string, erro
 	By(fmt.Sprintf("Initializing Vault, pod=%s", podName))
 
 	// Step 1: Initialize Vault
-	initCmd := exec.Command(
-		"oc", "exec", "-n", vaultNamespace, podName, "--",
-		"vault", "operator", "init", "-key-shares=1", "-key-threshold=1",
-	)
+	stdout, stderr, err := utils.ExecCommandInPod(ctx, client, config, utils.PodExecOptions{
+		Namespace: vaultNamespace,
+		PodName:   podName,
+		Command:   []string{"vault", "operator", "init", "-key-shares=1", "-key-threshold=1"},
+	})
 
-	initOut, err := utils.Run(initCmd)
 	if err != nil {
-		return "", fmt.Errorf("vault init failed: %w", err)
+		return "", fmt.Errorf("vault init failed: %w\nstderr: %s", err, stderr)
 	}
 
 	By("Vault initialized successfully")
 
 	// Step 2: Extract keys
-	lines := strings.Split(string(initOut), "\n")
-
+	lines := strings.Split(stdout, "\n")
 	var unsealKey, rootToken string
 
 	for _, l := range lines {
@@ -935,33 +934,32 @@ func setupVault(ctx context.Context, client *kubernetes.Clientset) (string, erro
 	// Step 3: Unseal Vault
 	By("Unsealing Vault")
 
-	unsealCmd := exec.Command(
-		"oc", "exec", "-n", vaultNamespace, podName, "--",
-		"vault", "operator", "unseal", unsealKey,
-	)
+	stdout, stderr, err = utils.ExecCommandInPod(ctx, client, config, utils.PodExecOptions{
+		Namespace: vaultNamespace,
+		PodName:   podName,
+		Command:   []string{"vault", "operator", "unseal", unsealKey},
+	})
 
-	unsealOut, err := utils.Run(unsealCmd)
 	if err != nil {
-		return "", fmt.Errorf("vault unseal failed: %w\n%s", err, string(unsealOut))
+		return "", fmt.Errorf("vault unseal failed: %w\nstderr: %s\nstdout: %s", err, stderr, stdout)
 	}
 
-	By(fmt.Sprintf("Vault unseal output:\n%s", string(unsealOut)))
+	By(fmt.Sprintf("Vault unseal output:\n%s", stdout))
 
 	// Step 4: Login
 	By("Logging into Vault")
 
-	loginCmd := exec.Command(
-		"oc", "exec", "-n", vaultNamespace, podName, "--",
-		"vault", "login", rootToken,
-	)
+	stdout, stderr, err = utils.ExecCommandInPod(ctx, client, config, utils.PodExecOptions{
+		Namespace: vaultNamespace,
+		PodName:   podName,
+		Command:   []string{"vault", "login", rootToken},
+	})
 
-	loginOut, err := utils.Run(loginCmd)
 	if err != nil {
-		return "", fmt.Errorf("vault login failed: %w\n%s", err, string(loginOut))
+		return "", fmt.Errorf("vault login failed: %w\nstderr: %s\nstdout: %s", err, stderr, stdout)
 	}
 
-	By(fmt.Sprintf("Vault login output:\n%s", string(loginOut)))
-
+	By(fmt.Sprintf("Vault login output:\n%s", stdout))
 	By("Vault initialized and unsealed successfully")
 
 	return rootToken, nil
@@ -984,41 +982,55 @@ func getVaultPodName(ctx context.Context, clientset *kubernetes.Clientset) (stri
 	return "", fmt.Errorf("no running vault pod found")
 }
 
-// Enable KV engine
-func enableKVEngine(ctx context.Context, client *kubernetes.Clientset, token string) error {
+// Enable KV engine using client-go
+func enableKVEngine(ctx context.Context, client *kubernetes.Clientset, config *rest.Config, token string) error {
 	podName, err := getVaultPodName(ctx, client)
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command(
-		"oc", "exec", "-n", vaultNamespace, podName, "--", "sh", "-c",
-		fmt.Sprintf(
-			"vault status && vault login %s && (vault secrets enable -path=secret kv-v2 2>&1 || echo 'KV engine may already be enabled')",
-			token,
-		),
+	// Execute the command using sh -c to handle the complex shell command
+	command := fmt.Sprintf(
+		"vault status && vault login %s && (vault secrets enable -path=secret kv-v2 2>&1 || echo 'KV engine may already be enabled')",
+		token,
 	)
 
-	out, err := utils.Run(cmd)
-	By(fmt.Sprintf("oc apply output:\n%s", string(out)))
+	stdout, stderr, err := utils.ExecCommandInPod(ctx, client, config, utils.PodExecOptions{
+		Namespace: vaultNamespace,
+		PodName:   podName,
+		Command:   []string{"sh", "-c", command},
+	})
+
+	By(fmt.Sprintf("Enable KV engine output:\n%s", stdout))
+	if stderr != "" {
+		By(fmt.Sprintf("Enable KV engine stderr:\n%s", stderr))
+	}
+
 	return err
 }
 
-// Create a vault test secret
-func createVaultTestSecret(ctx context.Context, client *kubernetes.Clientset, token string, secretname string, key, value string) error {
+// Create a vault test secret using client-go
+func createVaultTestSecret(ctx context.Context, client *kubernetes.Clientset, config *rest.Config, token string, secretname string, key, value string) error {
 	podName, err := getVaultPodName(ctx, client)
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command(
-		"oc", "exec", "-n", vaultNamespace, podName, "--",
-		"vault", "kv", "put", fmt.Sprintf("secret/%s", secretname),
-		fmt.Sprintf("%s=%s", key, value),
-	)
+	stdout, stderr, err := utils.ExecCommandInPod(ctx, client, config, utils.PodExecOptions{
+		Namespace: vaultNamespace,
+		PodName:   podName,
+		Command: []string{
+			"vault", "kv", "put",
+			fmt.Sprintf("secret/%s", secretname),
+			fmt.Sprintf("%s=%s", key, value),
+		},
+	})
 
-	out, err := utils.Run(cmd)
-	By(fmt.Sprintf("oc apply output:\n%s", string(out)))
+	By(fmt.Sprintf("Create vault secret output:\n%s", stdout))
+	if stderr != "" {
+		By(fmt.Sprintf("Create vault secret stderr:\n%s", stderr))
+	}
+
 	return err
 }
 
