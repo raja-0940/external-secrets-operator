@@ -41,6 +41,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -734,11 +736,20 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			vaultSecretValue = "bar"
 		)
 
-		BeforeAll(func() {
+		var (
+			config *rest.Config
+		)
 
+		BeforeAll(func() {
 			var err error
-			config, err = utils.GetConfigForTest(GinkgoT())
-			Expect(err).NotTo(HaveOccurred())
+			// Get rest.Config from kubeconfig
+			loader := clientcmd.NewDefaultClientConfigLoadingRules()
+			clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+				loader,
+				&clientcmd.ConfigOverrides{ClusterInfo: api.Cluster{InsecureSkipTLSVerify: true}},
+			)
+			config, err = clientConfig.ClientConfig()
+			Expect(err).NotTo(HaveOccurred(), "failed to get kubeconfig")
 
 			By("Deploying Vault")
 			Expect(applyVault(ctx, dynamicClient)).To(Succeed())
