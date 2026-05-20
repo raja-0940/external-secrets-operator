@@ -199,6 +199,13 @@ func pluralizeResource(kind string) string {
 		return "networkpolicies"
 	case "ingress":
 		return "ingresses"
+	case "policy":
+		return "policies"
+	default:
+		// Simple rule: add 's' to lowercase kind
+		return lower + "s"
+	}
+}
 
 // GetClusterArchitecture detects the architecture of the Kubernetes cluster
 // by checking the node architecture labels
