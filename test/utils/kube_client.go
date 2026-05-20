@@ -208,9 +208,11 @@ func pluralizeResource(kind string) string {
 }
 
 // GetClusterArchitecture detects the architecture of the Kubernetes cluster
-// by checking the node architecture labels and status
+// by checking all worker nodes and returning the most common architecture
+// For multi-arch clusters, it prioritizes non-amd64 architectures (ppc64le, arm64, s390x)
 func GetClusterArchitecture(ctx context.Context, client kubernetes.Interface) (string, error) {
-	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{Limit: 1})
+	// List all nodes
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return "", fmt.Errorf("failed to list nodes: %w", err)
 	}
@@ -219,31 +221,50 @@ func GetClusterArchitecture(ctx context.Context, client kubernetes.Interface) (s
 		return "", fmt.Errorf("no nodes found in cluster")
 	}
 
-	node := nodes.Items[0]
+	// Count architectures across all nodes
+	archCount := make(map[string]int)
 
-	// Try multiple sources for architecture information
-	// 1. Check standard label: kubernetes.io/arch
-	if arch, ok := node.Labels["kubernetes.io/arch"]; ok && arch != "" {
-		return arch, nil
+	for _, node := range nodes.Items {
+		var arch string
+
+		// Try multiple sources for architecture information
+		if a, ok := node.Labels["kubernetes.io/arch"]; ok && a != "" {
+			arch = a
+		} else if a, ok := node.Labels["beta.kubernetes.io/arch"]; ok && a != "" {
+			arch = a
+		} else if node.Status.NodeInfo.Architecture != "" {
+			arch = node.Status.NodeInfo.Architecture
+		}
+
+		if arch != "" {
+			archCount[arch]++
+		}
 	}
 
-	// 2. Check beta label for older clusters
-	if arch, ok := node.Labels["beta.kubernetes.io/arch"]; ok && arch != "" {
-		return arch, nil
+	if len(archCount) == 0 {
+		return "", fmt.Errorf("no architecture information found on any node")
 	}
 
-	// 3. Check node status architecture field
-	if node.Status.NodeInfo.Architecture != "" {
-		return node.Status.NodeInfo.Architecture, nil
+	// For multi-arch clusters, prioritize non-amd64 architectures
+	// This is because tests are often run on specialized architectures
+	priorityArchs := []string{"ppc64le", "s390x", "arm64"}
+	for _, arch := range priorityArchs {
+		if count, exists := archCount[arch]; exists && count > 0 {
+			return arch, nil
+		}
 	}
 
-	// 4. Check OpenShift specific label
-	if arch, ok := node.Labels["kubernetes.io/hostname"]; ok {
-		// This is a fallback - log available labels for debugging
-		return "", fmt.Errorf("architecture not found. Node: %s, Available labels: %v", arch, node.Labels)
+	// If no priority arch found, return the most common architecture
+	var mostCommonArch string
+	maxCount := 0
+	for arch, count := range archCount {
+		if count > maxCount {
+			maxCount = count
+			mostCommonArch = arch
+		}
 	}
 
-	return "", fmt.Errorf("architecture information not found on node %s", node.Name)
+	return mostCommonArch, nil
 }
 
 // GetVaultImageForArchitecture returns the appropriate vault image for the given architecture
@@ -338,6 +359,7 @@ func ApplyManifestFromFileWithImageSubstitution(ctx context.Context, dynamicClie
 }
 
 // substituteContainerImages replaces container images in a Deployment or StatefulSet
+// and adds node selector for the target architecture
 func substituteContainerImages(obj *unstructured.Unstructured, imageSubstitutions map[string]string) error {
 	// Get the containers from spec.template.spec.containers
 	containers, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
@@ -350,6 +372,7 @@ func substituteContainerImages(obj *unstructured.Unstructured, imageSubstitution
 
 	// Iterate through containers and substitute images
 	modified := false
+	var targetArch string
 	for i, container := range containers {
 		containerMap, ok := container.(map[string]interface{})
 		if !ok {
@@ -367,6 +390,15 @@ func substituteContainerImages(obj *unstructured.Unstructured, imageSubstitution
 				containerMap["image"] = newImage
 				containers[i] = containerMap
 				modified = true
+
+				// Determine target architecture from the new image
+				if strings.Contains(newImage, "ppc64le") {
+					targetArch = "ppc64le"
+				} else if strings.Contains(newImage, "arm64") {
+					targetArch = "arm64"
+				} else if strings.Contains(newImage, "s390x") {
+					targetArch = "s390x"
+				}
 				break
 			}
 		}
@@ -376,6 +408,16 @@ func substituteContainerImages(obj *unstructured.Unstructured, imageSubstitution
 	if modified {
 		if err := unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers"); err != nil {
 			return fmt.Errorf("failed to set containers: %w", err)
+		}
+
+		// Add node selector if we detected a specific architecture
+		if targetArch != "" {
+			nodeSelector := map[string]interface{}{
+				"kubernetes.io/arch": targetArch,
+			}
+			if err := unstructured.SetNestedMap(obj.Object, nodeSelector, "spec", "template", "spec", "nodeSelector"); err != nil {
+				return fmt.Errorf("failed to set nodeSelector: %w", err)
+			}
 		}
 	}
 

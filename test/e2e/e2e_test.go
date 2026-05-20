@@ -883,14 +883,19 @@ func applyVault(ctx context.Context, dynamicClient *dynamic.DynamicClient, clien
 	By(fmt.Sprintf("Applying vault manifest from: %s", vaultManifestFile))
 
 	// Get node information for debugging
-	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{Limit: 1})
+	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err == nil && len(nodes.Items) > 0 {
-		node := nodes.Items[0]
-		By(fmt.Sprintf("Node name: %s", node.Name))
-		By(fmt.Sprintf("Node labels: kubernetes.io/arch=%s, beta.kubernetes.io/arch=%s",
-			node.Labels["kubernetes.io/arch"],
-			node.Labels["beta.kubernetes.io/arch"]))
-		By(fmt.Sprintf("Node status architecture: %s", node.Status.NodeInfo.Architecture))
+		archCount := make(map[string]int)
+		for _, node := range nodes.Items {
+			arch := node.Labels["kubernetes.io/arch"]
+			if arch == "" {
+				arch = node.Status.NodeInfo.Architecture
+			}
+			if arch != "" {
+				archCount[arch]++
+			}
+		}
+		By(fmt.Sprintf("Cluster has %d nodes with architectures: %v", len(nodes.Items), archCount))
 	}
 
 	// Detect cluster architecture
