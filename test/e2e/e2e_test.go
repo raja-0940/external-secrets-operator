@@ -752,7 +752,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			Expect(err).NotTo(HaveOccurred(), "failed to get kubeconfig")
 
 			By("Deploying Vault")
-			Expect(applyVault(ctx, dynamicClient)).To(Succeed())
+			Expect(applyVault(ctx, dynamicClient, clientset)).To(Succeed())
 
 			By("Waiting for Vault pod")
 			Expect(waitForVaultPod(ctx, clientset)).To(Succeed())
@@ -878,16 +878,35 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 	})
 })
 
-// Apply vault manifest using dynamic client
-func applyVault(ctx context.Context, dynamicClient *dynamic.DynamicClient) error {
+// Apply vault manifest using dynamic client with architecture-specific image substitution
+func applyVault(ctx context.Context, dynamicClient *dynamic.DynamicClient, clientset *kubernetes.Clientset) error {
 	By(fmt.Sprintf("Applying vault manifest from: %s", vaultManifestFile))
 
-	err := utils.ApplyManifestFromFile(ctx, dynamicClient, vaultManifestFile)
+	// Detect cluster architecture
+	arch, err := utils.GetClusterArchitecture(ctx, clientset)
+	if err != nil {
+		return fmt.Errorf("failed to detect cluster architecture: %w", err)
+	}
+	By(fmt.Sprintf("Detected cluster architecture: %s", arch))
+
+	// Get the appropriate vault image for this architecture
+	vaultImage := utils.GetVaultImageForArchitecture(arch)
+	By(fmt.Sprintf("Using vault image: %s", vaultImage))
+
+	// Create image substitution map
+	imageSubstitutions := map[string]string{
+		"vault-ppc64le":                    vaultImage, // Match the image name in yaml
+		"icr.io/ppc64le-oss/vault-ppc64le": vaultImage, // Match full image path
+		"hashicorp/vault":                  vaultImage, // Match official image
+	}
+
+	// Apply manifest with image substitution
+	err = utils.ApplyManifestFromFileWithImageSubstitution(ctx, dynamicClient, vaultManifestFile, imageSubstitutions)
 	if err != nil {
 		return fmt.Errorf("failed to apply vault manifest: %w", err)
 	}
 
-	By("Vault manifest applied successfully")
+	By(fmt.Sprintf("Vault manifest applied successfully with %s image", vaultImage))
 	return nil
 }
 

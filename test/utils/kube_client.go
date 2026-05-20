@@ -199,6 +199,168 @@ func pluralizeResource(kind string) string {
 		return "networkpolicies"
 	case "ingress":
 		return "ingresses"
+
+// GetClusterArchitecture detects the architecture of the Kubernetes cluster
+// by checking the node architecture labels
+func GetClusterArchitecture(ctx context.Context, client kubernetes.Interface) (string, error) {
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{Limit: 1})
+	if err != nil {
+		return "", fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	if len(nodes.Items) == 0 {
+		return "", fmt.Errorf("no nodes found in cluster")
+	}
+
+	// Get architecture from node labels
+	// Standard label: kubernetes.io/arch
+	arch, ok := nodes.Items[0].Labels["kubernetes.io/arch"]
+	if !ok {
+		// Fallback to beta label for older clusters
+		arch, ok = nodes.Items[0].Labels["beta.kubernetes.io/arch"]
+		if !ok {
+			return "", fmt.Errorf("architecture label not found on node")
+		}
+	}
+
+	return arch, nil
+}
+
+// GetVaultImageForArchitecture returns the appropriate vault image for the given architecture
+func GetVaultImageForArchitecture(arch string) string {
+	// Map of architecture to vault images
+	vaultImages := map[string]string{
+		"amd64":   "hashicorp/vault:1.14.8",
+		"arm64":   "hashicorp/vault:1.14.8",
+		"ppc64le": "icr.io/ppc64le-oss/vault-ppc64le:v1.14.8",
+		"s390x":   "hashicorp/vault:1.14.8", // Use official image if available
+	}
+
+	image, ok := vaultImages[arch]
+	if !ok {
+		// Default to amd64 image if architecture not found
+		return vaultImages["amd64"]
+	}
+
+
+// ApplyManifestFromFileWithImageSubstitution applies Kubernetes manifests from a YAML file
+// and substitutes container images based on the provided image map
+func ApplyManifestFromFileWithImageSubstitution(ctx context.Context, dynamicClient dynamic.Interface, filePath string, imageSubstitutions map[string]string) error {
+	// Read the file
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read manifest file: %w", err)
+	}
+
+	// Split YAML documents
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
+
+	for {
+		var obj unstructured.Unstructured
+		if err := decoder.Decode(&obj); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("failed to decode manifest: %w", err)
+		}
+
+		// Skip empty documents
+		if obj.Object == nil {
+			continue
+		}
+
+		// Substitute images if this is a Deployment or StatefulSet
+		if obj.GetKind() == "Deployment" || obj.GetKind() == "StatefulSet" {
+			if err := substituteContainerImages(&obj, imageSubstitutions); err != nil {
+				return fmt.Errorf("failed to substitute images: %w", err)
+			}
+		}
+
+		// Get GVR (GroupVersionResource) from the object
+		gvk := obj.GroupVersionKind()
+		gvr := schema.GroupVersionResource{
+			Group:    gvk.Group,
+			Version:  gvk.Version,
+			Resource: pluralizeResource(gvk.Kind),
+		}
+
+		namespace := obj.GetNamespace()
+		name := obj.GetName()
+
+		// Try to get the resource first
+		var resourceClient dynamic.ResourceInterface
+		if namespace != "" {
+			resourceClient = dynamicClient.Resource(gvr).Namespace(namespace)
+		} else {
+			resourceClient = dynamicClient.Resource(gvr)
+		}
+
+		existing, err := resourceClient.Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			// Resource exists, update it
+			obj.SetResourceVersion(existing.GetResourceVersion())
+			_, err = resourceClient.Update(ctx, &obj, metav1.UpdateOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to update %s/%s: %w", gvk.Kind, name, err)
+			}
+		} else {
+			// Resource doesn't exist, create it
+			_, err = resourceClient.Create(ctx, &obj, metav1.CreateOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to create %s/%s: %w", gvk.Kind, name, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// substituteContainerImages replaces container images in a Deployment or StatefulSet
+func substituteContainerImages(obj *unstructured.Unstructured, imageSubstitutions map[string]string) error {
+	// Get the containers from spec.template.spec.containers
+	containers, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+	if err != nil {
+		return fmt.Errorf("failed to get containers: %w", err)
+	}
+	if !found {
+		return nil // No containers to substitute
+	}
+
+	// Iterate through containers and substitute images
+	modified := false
+	for i, container := range containers {
+		containerMap, ok := container.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		currentImage, found, err := unstructured.NestedString(containerMap, "image")
+		if err != nil || !found {
+			continue
+		}
+
+		// Check if we have a substitution for this image
+		for oldImage, newImage := range imageSubstitutions {
+			if strings.Contains(currentImage, oldImage) || currentImage == oldImage {
+				containerMap["image"] = newImage
+				containers[i] = containerMap
+				modified = true
+				break
+			}
+		}
+	}
+
+	// Update the object if we made changes
+	if modified {
+		if err := unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers"); err != nil {
+			return fmt.Errorf("failed to set containers: %w", err)
+		}
+	}
+
+	return nil
+}
+	return image
+}
 	case "policy":
 		return "policies"
 	default:
