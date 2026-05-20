@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -187,16 +188,21 @@ func ApplyManifestFromFile(ctx context.Context, dynamicClient dynamic.Interface,
 // pluralizeResource converts Kind to resource name (simple pluralization)
 // For production use, consider using discovery client or a proper pluralization library
 func pluralizeResource(kind string) string {
+	// Convert to lowercase first
+	lower := strings.ToLower(kind)
+
 	// Simple pluralization rules
-	switch kind {
-	case "Endpoints":
+	switch lower {
+	case "endpoints":
 		return "endpoints"
-	case "NetworkPolicy":
+	case "networkpolicy":
 		return "networkpolicies"
-	case "Ingress":
+	case "ingress":
 		return "ingresses"
+	case "policy":
+		return "policies"
 	default:
 		// Simple rule: add 's' to lowercase kind
-		return fmt.Sprintf("%ss", kind)
+		return lower + "s"
 	}
 }
