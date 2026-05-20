@@ -112,6 +112,12 @@ func ExecCommandInPod(ctx context.Context, client kubernetes.Interface, config *
 	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdin:  opts.Stdin,
 		Stdout: &stdout,
+		Stderr: &stderr,
+		Tty:    false,
+	})
+
+	return stdout.String(), stderr.String(), err
+}
 
 // ApplyManifestFromFile applies Kubernetes manifests from a YAML file using dynamic client
 // This is a client-go alternative to "kubectl apply -f"
@@ -124,7 +130,7 @@ func ApplyManifestFromFile(ctx context.Context, dynamicClient dynamic.Interface,
 
 	// Split YAML documents
 	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
-	
+
 	for {
 		var obj unstructured.Unstructured
 		if err := decoder.Decode(&obj); err != nil {
@@ -193,10 +199,4 @@ func pluralizeResource(kind string) string {
 		// Simple rule: add 's' to lowercase kind
 		return fmt.Sprintf("%ss", kind)
 	}
-}
-		Stderr: &stderr,
-		Tty:    false,
-	})
-
-	return stdout.String(), stderr.String(), err
 }
