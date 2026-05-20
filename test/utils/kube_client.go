@@ -249,6 +249,8 @@ func GetVaultImageForArchitecture(arch string) string {
 		return vaultImages["amd64"]
 	}
 
+	return image
+}
 
 // ApplyManifestFromFileWithImageSubstitution applies Kubernetes manifests from a YAML file
 // and substitutes container images based on the provided image map
