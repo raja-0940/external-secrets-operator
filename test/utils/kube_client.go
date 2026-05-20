@@ -368,12 +368,3 @@ func substituteContainerImages(obj *unstructured.Unstructured, imageSubstitution
 
 	return nil
 }
-	return image
-}
-	case "policy":
-		return "policies"
-	default:
-		// Simple rule: add 's' to lowercase kind
-		return lower + "s"
-	}
-}
