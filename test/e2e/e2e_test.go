@@ -882,6 +882,17 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 func applyVault(ctx context.Context, dynamicClient *dynamic.DynamicClient, clientset *kubernetes.Clientset) error {
 	By(fmt.Sprintf("Applying vault manifest from: %s", vaultManifestFile))
 
+	// Get node information for debugging
+	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{Limit: 1})
+	if err == nil && len(nodes.Items) > 0 {
+		node := nodes.Items[0]
+		By(fmt.Sprintf("Node name: %s", node.Name))
+		By(fmt.Sprintf("Node labels: kubernetes.io/arch=%s, beta.kubernetes.io/arch=%s",
+			node.Labels["kubernetes.io/arch"],
+			node.Labels["beta.kubernetes.io/arch"]))
+		By(fmt.Sprintf("Node status architecture: %s", node.Status.NodeInfo.Architecture))
+	}
+
 	// Detect cluster architecture
 	arch, err := utils.GetClusterArchitecture(ctx, clientset)
 	if err != nil {
@@ -891,7 +902,7 @@ func applyVault(ctx context.Context, dynamicClient *dynamic.DynamicClient, clien
 
 	// Get the appropriate vault image for this architecture
 	vaultImage := utils.GetVaultImageForArchitecture(arch)
-	By(fmt.Sprintf("Using vault image: %s", vaultImage))
+	By(fmt.Sprintf("Using vault image: %s for architecture: %s", vaultImage, arch))
 
 	// Create image substitution map
 	imageSubstitutions := map[string]string{

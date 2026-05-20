@@ -208,7 +208,7 @@ func pluralizeResource(kind string) string {
 }
 
 // GetClusterArchitecture detects the architecture of the Kubernetes cluster
-// by checking the node architecture labels
+// by checking the node architecture labels and status
 func GetClusterArchitecture(ctx context.Context, client kubernetes.Interface) (string, error) {
 	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{Limit: 1})
 	if err != nil {
@@ -219,18 +219,31 @@ func GetClusterArchitecture(ctx context.Context, client kubernetes.Interface) (s
 		return "", fmt.Errorf("no nodes found in cluster")
 	}
 
-	// Get architecture from node labels
-	// Standard label: kubernetes.io/arch
-	arch, ok := nodes.Items[0].Labels["kubernetes.io/arch"]
-	if !ok {
-		// Fallback to beta label for older clusters
-		arch, ok = nodes.Items[0].Labels["beta.kubernetes.io/arch"]
-		if !ok {
-			return "", fmt.Errorf("architecture label not found on node")
-		}
+	node := nodes.Items[0]
+
+	// Try multiple sources for architecture information
+	// 1. Check standard label: kubernetes.io/arch
+	if arch, ok := node.Labels["kubernetes.io/arch"]; ok && arch != "" {
+		return arch, nil
 	}
 
-	return arch, nil
+	// 2. Check beta label for older clusters
+	if arch, ok := node.Labels["beta.kubernetes.io/arch"]; ok && arch != "" {
+		return arch, nil
+	}
+
+	// 3. Check node status architecture field
+	if node.Status.NodeInfo.Architecture != "" {
+		return node.Status.NodeInfo.Architecture, nil
+	}
+
+	// 4. Check OpenShift specific label
+	if arch, ok := node.Labels["kubernetes.io/hostname"]; ok {
+		// This is a fallback - log available labels for debugging
+		return "", fmt.Errorf("architecture not found. Node: %s, Available labels: %v", arch, node.Labels)
+	}
+
+	return "", fmt.Errorf("architecture information not found on node %s", node.Name)
 }
 
 // GetVaultImageForArchitecture returns the appropriate vault image for the given architecture
