@@ -1943,17 +1943,17 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			)
 
 			By("Ensuring ExternalSecretsConfig has Vault egress network policy")
-			updatedGeneration, err := ensureVaultEgressOnExternalSecretsConfig(ctx, runtimeClient, externalsecretsConfigFile)
+			updated, err := ensureVaultEgressOnExternalSecretsConfig(ctx, runtimeClient, externalsecretsConfigFile)
 			Expect(err).NotTo(HaveOccurred())
-			if updatedGeneration > 0 {
+			if updated {
 				By("Waiting for ExternalSecretsConfig to reconcile with Vault egress policy")
-				Expect(waitForExternalSecretsConfigReadyForGeneration(ctx, dynamicClient, "cluster", 2*time.Minute, updatedGeneration)).To(Succeed())
+				Expect(utils.WaitForExternalSecretsConfigReady(ctx, dynamicClient, "cluster", 2*time.Minute)).To(Succeed())
 
 				By("Waiting for Vault egress NetworkPolicy to be created")
 				Eventually(func() error {
 					_, err := clientset.NetworkingV1().NetworkPolicies(operandNamespace).Get(ctx, vaultEgressNetworkPolicyK8sName, metav1.GetOptions{})
 					return err
-				}, 2*time.Minute, 2*time.Second).Should(Succeed(), "NetworkPolicy %s should be created in namespace %s", vaultEgressNetworkPolicyK8sName, operandNamespace)
+				}, 30*time.Second, 2*time.Second).Should(Succeed(), "NetworkPolicy %s should be created in namespace %s", vaultEgressNetworkPolicyK8sName, operandNamespace)
 			}
 
 			By("Creating SecretStore")
@@ -2517,10 +2517,9 @@ func loadExternalSecretsConfigFromFile(assetFunc func(string) ([]byte, error), f
 }
 
 // ensureVaultEgressOnExternalSecretsConfig ensures the cluster ExternalSecretsConfig has the Vault egress
-// network policies. If the spec was updated it returns the new metadata.generation so callers can wait
-// for the operator to process exactly that generation. Returns 0 when no update was needed.
-func ensureVaultEgressOnExternalSecretsConfig(ctx context.Context, c client.Client, vaultConfigFile string) (int64, error) {
-	var newGeneration int64
+// network policies. If policies are missing or different, they are updated. Returns true if an update was made.
+func ensureVaultEgressOnExternalSecretsConfig(ctx context.Context, c client.Client, vaultConfigFile string) (bool, error) {
+	var updated bool
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		esc := &operatorv1alpha1.ExternalSecretsConfig{}
 		if err := c.Get(ctx, client.ObjectKey{Name: "cluster"}, esc); err != nil {
@@ -2536,11 +2535,17 @@ func ensureVaultEgressOnExternalSecretsConfig(ctx context.Context, c client.Clie
 		// Check if Vault network policies already exist.
 		// The list map key is (name, componentName); match both to avoid a false
 		// positive when a different component happens to share the same policy name.
+		hasVaultPolicies := false
 		for _, np := range esc.Spec.ControllerConfig.NetworkPolicies {
 			if np.Name == vaultEgressNetworkPolicyName &&
 				np.ComponentName == operatorv1alpha1.CoreController {
-				return nil // already present, nothing to do
+				hasVaultPolicies = true
+				break
 			}
+		}
+
+		if hasVaultPolicies {
+			return nil
 		}
 
 		// Append Vault network policies
@@ -2549,78 +2554,8 @@ func ensureVaultEgressOnExternalSecretsConfig(ctx context.Context, c client.Clie
 		if err := c.Update(ctx, esc); err != nil {
 			return err
 		}
-		// After a successful Update the server increments generation by 1.
-		newGeneration = esc.Generation + 1
+		updated = true
 		return nil
 	})
-	return newGeneration, err
-}
-
-// waitForExternalSecretsConfigReadyForGeneration waits for the ExternalSecretsConfig CR to
-// report Ready=True and Degraded=False with observedGeneration >= expectedGeneration.
-//
-// This prevents the race where utils.WaitForExternalSecretsConfigReady returns immediately
-// because it sees a stale Ready=True condition from the previous reconcile cycle (with an
-// older observedGeneration), before the operator has processed the latest spec update that
-// adds the vault egress NetworkPolicy.
-func waitForExternalSecretsConfigReadyForGeneration(
-	ctx context.Context,
-	client dynamic.Interface,
-	name string,
-	timeout time.Duration,
-	expectedGeneration int64,
-) error {
-	var lastReadyCondition, lastDegradedCondition map[string]interface{}
-
-	err := wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		u, err := client.Resource(operatorv1alpha1.ExternalSecretsConfigGVR).Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			return false, nil
-		}
-
-		conds, found, err := unstructured.NestedSlice(u.Object, "status", "conditions")
-		if err != nil || !found {
-			return false, nil
-		}
-
-		for _, c := range conds {
-			cond, ok := c.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			switch cond["type"] {
-			case "Ready":
-				lastReadyCondition = cond
-			case "Degraded":
-				lastDegradedCondition = cond
-			}
-		}
-
-		if lastReadyCondition == nil || lastDegradedCondition == nil {
-			return false, nil
-		}
-		if lastReadyCondition["status"] != "True" || lastDegradedCondition["status"] != "False" {
-			return false, nil
-		}
-
-		// Confirm the operator reconciled this specific generation before returning.
-		obsGen, _, _ := unstructured.NestedInt64(lastReadyCondition, "observedGeneration")
-		return obsGen >= expectedGeneration, nil
-	})
-
-	if err != nil && wait.Interrupted(err) {
-		readyMsg, degradedMsg := "not set", "not set"
-		if lastReadyCondition != nil {
-			readyMsg = fmt.Sprintf("status=%v observedGeneration=%v reason=%v message=%v",
-				lastReadyCondition["status"], lastReadyCondition["observedGeneration"],
-				lastReadyCondition["reason"], lastReadyCondition["message"])
-		}
-		if lastDegradedCondition != nil {
-			degradedMsg = fmt.Sprintf("status=%v reason=%v message=%v",
-				lastDegradedCondition["status"], lastDegradedCondition["reason"], lastDegradedCondition["message"])
-		}
-		return fmt.Errorf("timeout waiting for ExternalSecretsConfig %s Ready at generation %d: Ready=[%s] Degraded=[%s]",
-			name, expectedGeneration, readyMsg, degradedMsg)
-	}
-	return err
+	return updated, err
 }
