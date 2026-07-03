@@ -1943,18 +1943,18 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 			)
 
 			By("Ensuring ExternalSecretsConfig has Vault egress network policy")
-			updated, err := ensureVaultEgressOnExternalSecretsConfig(ctx, runtimeClient, externalsecretsConfigFile)
+			_, err := ensureVaultEgressOnExternalSecretsConfig(ctx, runtimeClient, externalsecretsConfigFile)
 			Expect(err).NotTo(HaveOccurred())
-			if updated {
-				By("Waiting for ExternalSecretsConfig to reconcile with Vault egress policy")
-				Expect(utils.WaitForExternalSecretsConfigReady(ctx, dynamicClient, "cluster", 2*time.Minute)).To(Succeed())
 
-				By("Waiting for Vault egress NetworkPolicy to be created")
-				Eventually(func() error {
-					_, err := clientset.NetworkingV1().NetworkPolicies(operandNamespace).Get(ctx, vaultEgressNetworkPolicyK8sName, metav1.GetOptions{})
-					return err
-				}, 30*time.Second, 2*time.Second).Should(Succeed(), "NetworkPolicy %s should be created in namespace %s", vaultEgressNetworkPolicyK8sName, operandNamespace)
-			}
+			// Always wait for the operator to create the NetworkPolicy regardless of whether the
+			// ESC spec was just updated or was already configured from a prior run.  Using the
+			// NetworkPolicy existence as the direct signal avoids relying on ESC status conditions
+			// whose observedGeneration can lag on slow (e.g. ppc64le) clusters.
+			By("Waiting for Vault egress NetworkPolicy to be created")
+			Eventually(func() error {
+				_, err := clientset.NetworkingV1().NetworkPolicies(operandNamespace).Get(ctx, vaultEgressNetworkPolicyK8sName, metav1.GetOptions{})
+				return err
+			}, 3*time.Minute, 5*time.Second).Should(Succeed(), "NetworkPolicy %s should be created in namespace %s", vaultEgressNetworkPolicyK8sName, operandNamespace)
 
 			By("Creating SecretStore")
 			// Create template replacements map for SecretStore
