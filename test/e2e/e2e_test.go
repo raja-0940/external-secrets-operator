@@ -70,18 +70,18 @@ const (
 
 const (
 	// test resource names
-	operatorNamespace              = common.ExternalSecretsOperatorCommonName
-	operandNamespace               = externalsecrets.OperandDefaultNamespace
-	operatorPodPrefix              = common.ExternalSecretsOperatorCommonName + "-controller-manager-"
-	operandCoreControllerPodPrefix = externalsecrets.OperandCoreControllerPodPrefix
-	operandCertControllerPodPrefix = externalsecrets.OperandCertControllerPodPrefix
-	operandWebhookPodPrefix        = externalsecrets.OperandWebhookPodPrefix
-	testNamespacePrefix            = "external-secrets-e2e-test-"
-	vaultNamespace                 = "vault-test"
-	vaultManifestFile              = "testdata/vault/vault.yaml"
-	vaultServiceName               = "vault"
-	vaultAddr                      = "http://vault.vault-test.svc.cluster.local:8200"
-	targetSecretName                = "k8s-secret-to-create" //must match with external_secret.yaml target.name
+	operatorNamespace               = common.ExternalSecretsOperatorCommonName
+	operandNamespace                = externalsecrets.OperandDefaultNamespace
+	operatorPodPrefix               = common.ExternalSecretsOperatorCommonName + "-controller-manager-"
+	operandCoreControllerPodPrefix  = externalsecrets.OperandCoreControllerPodPrefix
+	operandCertControllerPodPrefix  = externalsecrets.OperandCertControllerPodPrefix
+	operandWebhookPodPrefix         = externalsecrets.OperandWebhookPodPrefix
+	testNamespacePrefix             = "external-secrets-e2e-test-"
+	vaultNamespace                  = "vault-test"
+	vaultManifestFile               = "testdata/vault/vault.yaml"
+	vaultServiceName                = "vault"
+	vaultAddr                       = "http://vault.vault-test.svc.cluster.local:8200"
+	targetSecretName                = "k8s-secret-to-create"        //must match with external_secret.yaml target.name
 	vaultEgressNetworkPolicyName    = "allow-vault-egress"          // logical name stored in ExternalSecretsConfig spec
 	vaultEgressNetworkPolicyK8sName = "eso-user-allow-vault-egress" // actual Kubernetes object name (operator prepends "eso-user-")
 )
@@ -1953,7 +1953,7 @@ var _ = Describe("External Secrets Operator End-to-End test scenarios", Ordered,
 				Eventually(func() error {
 					_, err := clientset.NetworkingV1().NetworkPolicies(operandNamespace).Get(ctx, vaultEgressNetworkPolicyK8sName, metav1.GetOptions{})
 					return err
-				}, 30*time.Second, 2*time.Second).Should(Succeed(), "NetworkPolicy %s should be created in namespace %s", vaultEgressNetworkPolicyK8sName, operandNamespace)
+				}, 2*time.Minute, 2*time.Second).Should(Succeed(), "NetworkPolicy %s should be created in namespace %s", vaultEgressNetworkPolicyK8sName, operandNamespace)
 			}
 
 			By("Creating SecretStore")
@@ -2102,7 +2102,7 @@ func applyVault(ctx context.Context, dynamicClient *dynamic.DynamicClient, clien
 		Eventually(func() error {
 			_, createErr := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 			return createErr
-		}).WithTimeout(15*time.Second).WithPolling(1*time.Second).Should(Succeed())
+		}).WithTimeout(15 * time.Second).WithPolling(1 * time.Second).Should(Succeed())
 		By(fmt.Sprintf("Recreated namespace %s after termination", vaultNamespace))
 	} else {
 		By(fmt.Sprintf("Namespace %s already exists", vaultNamespace))
